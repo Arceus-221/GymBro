@@ -44,7 +44,14 @@ const call = async (systemPrompt, userPrompt, maxTokens) => {
     timeout: 30000,
   });
 
-  const rawText = response.data.candidates[0].content.parts[0].text;
+  const candidate = response.data.candidates?.[0];
+  if (candidate?.finishReason === 'MAX_TOKENS') {
+    throw Object.assign(new Error('AI output exceeded the response limit.'), { code: 'AI_OUTPUT_TRUNCATED' });
+  }
+  const rawText = candidate?.content?.parts?.find((part) => typeof part.text === 'string')?.text;
+  if (!rawText) {
+    throw Object.assign(new Error('AI response did not contain text.'), { code: 'AI_SCHEMA_VIOLATION' });
+  }
   return parseJsonDefensively(rawText);
 };
 

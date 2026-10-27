@@ -12,6 +12,20 @@ const generatePlanRequestSchema = z.object({
   customInstructions: nonEmptyTrimmedString(500, 'customInstructions').nullable().optional(),
 });
 
+const adjustPlanRequestSchema = z.object({
+  planId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+  instructions: nonEmptyTrimmedString(500, 'instructions'),
+  weeklySchedule: z.array(z.object({
+    dayLabel: z.enum(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']),
+    isRestDay: z.boolean(),
+    exercises: z.array(z.object({
+      name: nonEmptyTrimmedString(100, 'exercise name'),
+      sets: z.number().int().min(1).max(20),
+      repsRange: nonEmptyTrimmedString(100, 'exercise target'),
+    }).passthrough()).max(20),
+  }).passthrough()).length(7),
+});
+
 // ── POST /api/ai/generate-meal-plan ─────────────────────────────────
 // Mirrors generatePlanRequestSchema's shape — same "weekPreference +
 // customInstructions" contract, since a meal plan is structurally analogous
@@ -85,6 +99,7 @@ const chatRequestSchema = z.object({
 });
 
 module.exports = {
+  adjustPlanRequestSchema,
   generatePlanRequestSchema,
   generateMealPlanRequestSchema,
   estimateNutritionRequestSchema,

@@ -5,10 +5,9 @@
 // combination requires a custom dev build (native modules), which rules out
 // Expo Go. This app uses the Firebase JS SDK for BOTH Auth and Firestore so it
 // runs in Expo Go unmodified.
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { getApp, getApps, initializeApp } from 'firebase/app';
-import { getReactNativePersistence, initializeAuth } from 'firebase/auth';
+import { createFirebaseAuth } from './firebaseAuth';
 import {
   initializeFirestore,
   memoryLocalCache,
@@ -31,11 +30,7 @@ export const isFirebaseConfigured = Boolean(
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-// The JS SDK defaults to in-memory auth state on React Native, which would
-// sign the user out on every app restart — AsyncStorage is what persists it.
-export const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(AsyncStorage),
-});
+export const auth = createFirebaseAuth(app);
 
 // Phase 3 §3.3 specifies persistentLocalCache for offline-across-restarts.
 // That cache is IndexedDB-backed and IndexedDB does not exist in React

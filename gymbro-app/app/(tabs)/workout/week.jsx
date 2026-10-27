@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { EmptyState } from '../../../components/shared/EmptyState';
+import { Button } from '../../../components/shared/Button';
 import { LoadingSpinner } from '../../../components/shared/LoadingSpinner';
 import { ReadError } from '../../../components/shared/ReadError';
 import { ScreenHeader } from '../../../components/shared/ScreenHeader';
@@ -47,6 +48,7 @@ export default function WeeklyWorkoutPlan() {
             <Text style={styles.eyebrow}>YOUR TRAINING SCHEDULE</Text>
             <Text style={styles.heading}>THE WEEK AHEAD</Text>
             <Text style={styles.description}>Your workouts and recovery days, all in one place.</Text>
+            <Button label="EDIT PLAN" variant="secondary" onPress={() => router.push('/(tabs)/workout/edit')} />
           </View>
           {WEEKDAYS.map((label) => {
             const day = schedule.find((entry) => entry?.dayLabel === label);

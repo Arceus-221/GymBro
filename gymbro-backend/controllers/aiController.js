@@ -10,7 +10,7 @@ const { TOKEN_LIMITS } = require('../services/geminiService');
 const { MODEL_ID } = require('../services/aiProviders/geminiAdapter');
 const { validWorkoutTarget } = require('../services/workoutTarget');
 
-const { PLAN_SYSTEM_PROMPT, buildPlanUserPrompt } = require('../prompts/planPrompts');
+const { PLAN_SYSTEM_PROMPT, buildPlanUserPrompt, buildAdjustPlanUserPrompt } = require('../prompts/planPrompts');
 const { NUTRITION_SYSTEM_PROMPT, buildNutritionUserPrompt } = require('../prompts/nutritionPrompts');
 const { RECOVERY_SYSTEM_PROMPT, buildRecoveryUserPrompt } = require('../prompts/recoveryPrompts');
 const { SUBSTITUTE_SYSTEM_PROMPT, buildSubstituteUserPrompt } = require('../prompts/substitutePrompts');
@@ -25,6 +25,59 @@ const validatePlanShape = (data) =>
     Array.isArray(day.exercises) &&
     (day.isRestDay ? day.exercises.length === 0 : day.exercises.every(validWorkoutTarget))
   );
+
+const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const validAdjustedPlan = (data) => validatePlanShape(data) &&
+  WEEKDAYS.every(label => data.weeklySchedule.filter(day => day.dayLabel === label).length === 1) &&
+  data.weeklySchedule.every(day => Array.isArray(day.targetMuscleGroups) &&
+    day.targetMuscleGroups.every(group => typeof group === 'string') &&
+    Number.isFinite(day.estimatedDurationMinutes) && day.estimatedDurationMinutes >= 0 &&
+    (day.isRestDay || (
+    typeof day.sessionName === 'string' && day.sessionName.trim().length > 0 &&
+    day.exercises.length > 0 && day.exercises.length <= 20 &&
+    day.exercises.every(ex => typeof ex.name === 'string' && ex.name.trim().length > 0 &&
+      Number.isInteger(ex.sets) && ex.sets > 0 && ex.sets <= 20 &&
+      typeof ex.repsRange === 'string' && ex.repsRange.trim().length > 0 && ex.repsRange.length <= 100 &&
+      typeof ex.primaryMuscleGroup === 'string' && typeof ex.formCue === 'string' &&
+      Number.isFinite(ex.restSeconds) && ex.restSeconds >= 0 && Array.isArray(ex.substituteExercises) &&
+      ex.substituteExercises.every(item => typeof item === 'string'))
+  )));
+
+exports.adjustWorkoutPlan = async (req, res) => {
+  const { planId, instructions, weeklySchedule } = req.body;
+  try {
+    const userRef = db.collection('users').doc(req.user.uid);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists || userSnap.data().currentPlanId !== planId) {
+      return res.status(409).json({ success: false, error: 'PLAN_CHANGED', message: 'Your active plan changed. Reload it and try again.' });
+    }
+    const planSnap = await userRef.collection('workoutPlans').doc(planId).get();
+    if (!planSnap.exists) {
+      return res.status(404).json({ success: false, error: 'PLAN_NOT_FOUND', message: 'Workout plan not found.' });
+    }
+    const profile = userSnap.data().profile;
+    if (!profile || !Array.isArray(profile.availableEquipment)) {
+      return res.status(400).json({ success: false, error: 'INVALID_PROFILE', message: 'Complete your profile before adjusting your plan.' });
+    }
+    const count = weeklySchedule.filter(day => !day.isRestDay).length;
+    if (new Set(weeklySchedule.map(day => day.dayLabel)).size !== 7 || count === 0 ||
+      weeklySchedule.some(day => day.isRestDay ? day.exercises.length !== 0 : day.exercises.length === 0)) {
+      return res.status(400).json({ success: false, error: 'INVALID_PLAN', message: 'Add exercises to each training day and keep at least one training day.' });
+    }
+    const prompt = buildAdjustPlanUserPrompt({ ...profile, workoutDaysPerWeek: count }, planSnap.data().durationWeeks, weeklySchedule, instructions);
+    const result = await callGeminiResilient(PLAN_SYSTEM_PROMPT, prompt, TOKEN_LIMITS.PLAN_ADJUSTMENT, validAdjustedPlan);
+    if (result.weeklySchedule.filter(day => !day.isRestDay).length !== count) {
+      return res.status(502).json({ success: false, error: 'AI_MALFORMED_OUTPUT', message: 'AI changed the number of training days. Please try again.' });
+    }
+    let counter = 1;
+    const adjusted = result.weeklySchedule.map(day => ({ ...day, exercises: day.exercises.map(ex => ({
+      ...ex, exerciseId: `ex_${String(counter++).padStart(3, '0')}`,
+    })) }));
+    return res.status(200).json({ success: true, data: { weeklySchedule: adjusted } });
+  } catch (error) {
+    return res.status(error.httpStatus || 500).json({ success: false, error: error.code || 'AI_UNKNOWN_ERROR', message: error.message || 'Could not adjust the plan.' });
+  }
+};
 
 exports.generateWorkoutPlan = async (req, res) => {
   const { weekPreference, customInstructions } = req.body;

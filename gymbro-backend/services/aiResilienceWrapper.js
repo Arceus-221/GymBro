@@ -49,7 +49,7 @@ const callGeminiResilient = async (systemPrompt, userPrompt, maxTokens, validate
       const isServerError = status >= 500 && status < 600;
       const isTimeout = error.code === 'ECONNABORTED';
       const isMalformedJson = error instanceof SyntaxError;
-      const isSchemaViolation = error.code === 'AI_SCHEMA_VIOLATION';
+      const isSchemaViolation = error.code === 'AI_SCHEMA_VIOLATION' || error.code === 'AI_OUTPUT_TRUNCATED';
 
       const normalized = isRateLimit ? normalizeAiError(error) : null;
       const isNonRetryableQuota = normalized?.code === 'AI_DAILY_QUOTA_EXCEEDED';
@@ -112,7 +112,7 @@ const normalizeAiError = (error) => {
     return Object.assign(new Error('AI provider is temporarily unavailable.'), { httpStatus: 502, code: 'AI_PROVIDER_DOWN' });
   }
 
-  if (error instanceof SyntaxError || error.code === 'AI_SCHEMA_VIOLATION') {
+  if (error instanceof SyntaxError || error.code === 'AI_SCHEMA_VIOLATION' || error.code === 'AI_OUTPUT_TRUNCATED') {
     return Object.assign(new Error('AI returned an unexpected response format.'), { httpStatus: 502, code: 'AI_MALFORMED_OUTPUT' });
   }
 

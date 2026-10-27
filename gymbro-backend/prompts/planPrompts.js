@@ -99,4 +99,13 @@ Additional custom instructions from user: ${customInstructions ?? 'none'}
 <<<END_USER_INPUT>>>
 `;
 
-module.exports = { PLAN_SYSTEM_PROMPT, buildPlanUserPrompt };
+const removeDelimiters = (value) => String(value).replace(/<<<(?:END_)?USER_INPUT>>>/g, '[delimiter]');
+
+const buildAdjustPlanUserPrompt = (profile, durationWeeks, schedule, instructions) => {
+  const safeProfile = Object.fromEntries(Object.entries(profile).map(([key, value]) => [key,
+    typeof value === 'string' ? removeDelimiters(value) : Array.isArray(value) ? value.map(removeDelimiters) : value,
+  ]));
+  return `${buildPlanUserPrompt(safeProfile, durationWeeks, null)}\n\nRevise the following existing plan using the user's request. Preserve unrelated details where possible. Return the complete weekly plan.\n<<<USER_INPUT>>>\nCurrent schedule: ${removeDelimiters(JSON.stringify(schedule))}\nRequested changes: ${removeDelimiters(JSON.stringify(instructions))}\n<<<END_USER_INPUT>>>`;
+};
+
+module.exports = { PLAN_SYSTEM_PROMPT, buildPlanUserPrompt, buildAdjustPlanUserPrompt };

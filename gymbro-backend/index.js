@@ -13,7 +13,9 @@ const app = express();
 app.use(traceRequest);
 app.use(cors({
   origin: '*', // Tighten this in production to your app's domain if using a web build
+  exposedHeaders: ['X-Request-ID'],
 }));
+app.use('/api/ai/adjust-plan', express.json({ limit: '64kb' }));
 app.use(express.json({ limit: '10kb' })); // Limit body size to prevent abuse
 
 // Health check (unauthenticated — used by Render, the keep-warm GitHub Action,

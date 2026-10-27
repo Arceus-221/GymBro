@@ -9,6 +9,7 @@ const mealPlanController = require('../controllers/mealPlanController');
 
 const {
   generatePlanRequestSchema,
+  adjustPlanRequestSchema,
   generateMealPlanRequestSchema,
   estimateNutritionRequestSchema,
   recoveryScoreRequestSchema,
@@ -21,6 +22,14 @@ const {
 // Middleware order: auth -> per-user throttle -> body validation -> controller.
 // This ordering matters: never let an unauthenticated or spammy request reach
 // Zod/Gemini (Phase 4 §5.5, Phase 5 §2.5).
+
+router.post(
+  '/adjust-plan',
+  verifyToken,
+  perUserThrottle,
+  validateBody(adjustPlanRequestSchema),
+  aiController.adjustWorkoutPlan
+);
 
 router.post(
   '/generate-plan',
