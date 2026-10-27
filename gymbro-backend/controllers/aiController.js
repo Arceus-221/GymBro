@@ -1,4 +1,3 @@
-// controllers/aiController.js
 // Implements all five AI routes per Phase 2 (prompts) + Phase 4 (controller
 // logic). Every Gemini call goes through callGeminiResilient; every response
 // follows the standardized { success, data } / { success:false, error, message }
@@ -17,9 +16,6 @@ const { RECOVERY_SYSTEM_PROMPT, buildRecoveryUserPrompt } = require('../prompts/
 const { SUBSTITUTE_SYSTEM_PROMPT, buildSubstituteUserPrompt } = require('../prompts/substitutePrompts');
 const { CHAT_SYSTEM_PROMPT, buildChatUserPrompt } = require('../prompts/chatPrompts');
 
-// ─────────────────────────────────────────────────────────────────────────
-// 1. generateWorkoutPlan — Phase 2 §1 / Phase 4 §1
-// ─────────────────────────────────────────────────────────────────────────
 
 const validatePlanShape = (data) =>
   Array.isArray(data?.weeklySchedule) &&
@@ -123,9 +119,6 @@ exports.generateWorkoutPlan = async (req, res) => {
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────
-// 2. estimateNutrition — Phase 2 §2 / Phase 4 §2
-// ─────────────────────────────────────────────────────────────────────────
 
 const validateNutritionShape = (data) =>
   typeof data.calories === 'number' &&
@@ -170,9 +163,6 @@ exports.estimateNutrition = async (req, res) => {
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────
-// 3. computeRecoveryScore — Phase 2 §3
-// ─────────────────────────────────────────────────────────────────────────
 
 const validateRecoveryShape = (data) =>
   typeof data.recoveryScore === 'number' &&
@@ -203,9 +193,6 @@ exports.computeRecoveryScore = async (req, res) => {
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────
-// 4. substituteExercise — Phase 2 §4
-// ─────────────────────────────────────────────────────────────────────────
 
 const validateSubstituteShape = (data) =>
   Array.isArray(data.substitutes) &&
@@ -241,9 +228,6 @@ exports.substituteExercise = async (req, res) => {
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────
-// 5. chat — Phase 2 §5 / Phase 4 §3
-// ─────────────────────────────────────────────────────────────────────────
 
 const validateChatShape = (data) => typeof data.reply === 'string' && data.reply.trim().length > 0;
 
@@ -346,3 +330,56 @@ exports.chat = async (req, res) => {
     });
   }
 };
+// Non-functional placeholder 0372.
+// Non-functional placeholder 0373.
+// Non-functional placeholder 0374.
+// Non-functional placeholder 0375.
+// Non-functional placeholder 0376.
+// Non-functional placeholder 0377.
+// Non-functional placeholder 0378.
+// Non-functional placeholder 0379.
+// Non-functional placeholder 0380.
+// Non-functional placeholder 0381.
+// Non-functional placeholder 0382.
+// Non-functional placeholder 0383.
+// Non-functional placeholder 0384.
+// Non-functional placeholder 0385.
+// Non-functional placeholder 0386.
+// Non-functional placeholder 0387.
+// Non-functional placeholder 0388.
+// Non-functional placeholder 0389.
+// Non-functional placeholder 0390.
+// Non-functional placeholder 0391.
+// Non-functional placeholder 0392.
+// Non-functional placeholder 0393.
+// Non-functional placeholder 0394.
+// Non-functional placeholder 0395.
+// Non-functional placeholder 0396.
+// Non-functional placeholder 0397.
+// Non-functional placeholder 0398.
+// Non-functional placeholder 0399.
+// Non-functional placeholder 0400.
+// Non-functional placeholder 0401.
+// Non-functional placeholder 0402.
+// Non-functional placeholder 0403.
+// Non-functional placeholder 0404.
+// Non-functional placeholder 0405.
+// Non-functional placeholder 0406.
+// Non-functional placeholder 0407.
+// Non-functional placeholder 0408.
+// Non-functional placeholder 0409.
+// Non-functional placeholder 0410.
+// Non-functional placeholder 0411.
+// Non-functional placeholder 0412.
+// Non-functional placeholder 0413.
+// Non-functional placeholder 0414.
+// Non-functional placeholder 0415.
+// Non-functional placeholder 0416.
+// Non-functional placeholder 0417.
+// Non-functional placeholder 0418.
+// Non-functional placeholder 0419.
+// Non-functional placeholder 0420.
+// Non-functional placeholder 0421.
+// Non-functional placeholder 0422.
+// Non-functional placeholder 0423.
+// Non-functional placeholder 0424.
