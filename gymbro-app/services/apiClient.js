@@ -1,4 +1,3 @@
-// services/apiClient.js
 // Reusable helper for all backend AI calls (Path B). See Phase 1 §3I and
 // Phase 5 §1.2 for full rationale.
 import { auth } from './firebase';
