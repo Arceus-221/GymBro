@@ -186,6 +186,8 @@ export default function Dashboard() {
           <Button label="GENERATE NEW PLAN" onPress={handleGeneratePlan} loading={isGenerating} />
         ) : null}
 
+        <Button label="VIEW WEEKLY WORKOUT PLAN" variant="ghost" onPress={() => router.push('/(tabs)/workout/week')} />
+
         <View style={styles.splitRow}>
           <View style={styles.ringTile}>
             <Text style={styles.ringEyebrow}>Consistency</Text>

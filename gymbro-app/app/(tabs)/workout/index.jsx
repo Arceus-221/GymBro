@@ -217,6 +217,8 @@ export default function WorkoutMode() {
         </Text>
       </View>
 
+      <WeeklyPlanLink onPress={() => router.push('/(tabs)/workout/week')} />
+
       <ExerciseSelectorStrip
         exercises={session.exercises}
         activeIndex={session.exerciseIndex}
@@ -312,8 +314,22 @@ export default function WorkoutMode() {
 
 function DarkShell({ children, insets }) {
   const { styles } = useThemedStyles(makeStyles);
+  const router = useRouter();
   return (
-    <View style={[styles.flex, styles.centered, { paddingTop: insets.top + 40 }]}>{children}</View>
+    <View style={[styles.flex, styles.centered, { paddingTop: insets.top + 40 }]}>
+      {children}
+      <WeeklyPlanLink onPress={() => router.push('/(tabs)/workout/week')} />
+    </View>
+  );
+}
+
+function WeeklyPlanLink({ onPress }) {
+  const { styles, colors } = useThemedStyles(makeStyles);
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} style={styles.weekLink}>
+      <Text style={styles.weekLinkText}>VIEW WEEKLY PLAN</Text>
+      <Icon name="forward" size={15} color={colors.text.inverse} />
+    </Pressable>
   );
 }
 
@@ -374,6 +390,8 @@ const makeStyles = (colors) => StyleSheet.create({
   headerEyebrow: { ...typography.eyebrow, fontSize: 9, color: colors.text.inverseMuted },
   headerDay: { ...typography.label, fontSize: 12, color: colors.text.inverse },
   headerCount: { ...typography.eyebrow, fontSize: 10, color: colors.brand.redText },
+  weekLink: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.xl, paddingVertical: spacing.md, alignSelf: 'flex-start' },
+  weekLinkText: { ...typography.label, color: colors.text.inverse, fontSize: 11 },
   body: { padding: spacing.xl, paddingTop: spacing.sm, gap: spacing.lg, paddingBottom: 120 },
   exerciseName: { ...typography.hero, fontSize: 34, color: colors.brand.redText, marginTop: 4 },
   cue: { ...typography.small, color: colors.text.inverseMuted, marginTop: 6, lineHeight: 18 },
