@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { toggleEquipmentSelection } from '../constants/equipment';
 
 const EMPTY_DRAFT = {
   fitnessGoal: null,
@@ -27,28 +28,9 @@ export const useOnboardingDraftStore = create((set) => ({
     set((state) => ({ draft: { ...state.draft, [key]: value } })),
 
   toggleEquipment: (value) =>
-    set((state) => {
-      const current = state.draft.availableEquipment;
-      // bodyweight_only is mutually exclusive with everything else — selecting
-      // it clears the rest, and selecting anything else clears it.
-      if (value === 'bodyweight_only') {
-        return {
-          draft: {
-            ...state.draft,
-            availableEquipment: current.includes(value) ? [] : ['bodyweight_only'],
-          },
-        };
-      }
-      const withoutBodyweight = current.filter((v) => v !== 'bodyweight_only');
-      return {
-        draft: {
-          ...state.draft,
-          availableEquipment: withoutBodyweight.includes(value)
-            ? withoutBodyweight.filter((v) => v !== value)
-            : [...withoutBodyweight, value],
-        },
-      };
-    }),
+    set((state) => ({
+      draft: { ...state.draft, availableEquipment: toggleEquipmentSelection(state.draft.availableEquipment, value) },
+    })),
 
   reset: () => set({ draft: { ...EMPTY_DRAFT } }),
 }));

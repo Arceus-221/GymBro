@@ -14,14 +14,9 @@ export function LoadingSpinner({ message, dark = false, style }) {
   );
 }
 
-/**
- * Standard loading copy for Path B calls — swaps to the cold-start message
- * once useCallBackend reports we're probably waiting on Render (Phase 5 §1.2).
- */
+/** Give a generic wait message without guessing why a response is slow. */
 export function backendLoadingMessage(loadingHint, normalMessage = 'Thinking...') {
-  return loadingHint === 'waking'
-    ? 'Waking Coach up — this can take a moment on first use'
-    : normalMessage;
+  return loadingHint === 'slow' ? 'Still working on your request...' : normalMessage;
 }
 
 const makeStyles = (colors) => StyleSheet.create({

@@ -5,7 +5,7 @@ import { useUIStore } from '../store/useUIStore';
 
 // If nothing has come back by this point, we're most likely waiting on a
 // Render cold container rather than Gemini latency (Phase 5 §1.2 Layer 2).
-const COLD_START_HINT_DELAY_MS = 4000;
+const SLOW_REQUEST_HINT_DELAY_MS = 4000;
 
 /**
  * Client-side copy for the backend's standardized error codes (Phase 2 §7.6,
@@ -27,7 +27,7 @@ const ERROR_COPY = {
 
 export function useCallBackend() {
   const [isLoading, setIsLoading] = useState(false);
-  const [loadingHint, setLoadingHint] = useState(null); // null | 'normal' | 'waking'
+  const [loadingHint, setLoadingHint] = useState(null); // null | 'normal' | 'slow'
   const [error, setError] = useState(null);
   const hintTimerRef = useRef(null);
   const showError = useUIStore((s) => s.showError);
@@ -51,15 +51,15 @@ export function useCallBackend() {
       setError(null);
       setLoadingHint('normal');
       hintTimerRef.current = setTimeout(
-        () => setLoadingHint('waking'),
-        COLD_START_HINT_DELAY_MS
+        () => setLoadingHint('slow'),
+        SLOW_REQUEST_HINT_DELAY_MS
       );
 
       try {
         return await callBackend(endpoint, body);
       } catch (err) {
         setError(err);
-        if (!silent) showError(ERROR_COPY[err.code] || err.message);
+        if (!silent && err.code !== 'AUTH_CHANGED') showError(ERROR_COPY[err.code] || err.message);
         throw err;
       } finally {
         clearTimeout(hintTimerRef.current);

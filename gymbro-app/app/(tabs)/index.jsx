@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import { where } from 'firebase/firestore';
 import { useMemo, useState } from 'react';
 import {
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -18,13 +19,18 @@ import { Button } from '../../components/shared/Button';
 import { Card } from '../../components/shared/Card';
 import { BrandWordmark } from '../../components/shared/BrandWordmark';
 import { Icon } from '../../components/shared/Icon';
+import { ReadError } from '../../components/shared/ReadError';
+import { LoadingSpinner } from '../../components/shared/LoadingSpinner';
+import { useUIStore } from '../../store/useUIStore';
 import { ProgressRing } from '../../components/shared/ProgressRing';
 import { Eyebrow, Heading } from '../../components/shared/Typography';
 import { radius, spacing, typography } from '../../constants/theme';
 import { useCallBackend } from '../../hooks/useCallBackend';
 import { useFirestoreCollection } from '../../hooks/useFirestoreCollection';
 import { useFirestoreDoc } from '../../hooks/useFirestoreDoc';
-import { currentWeekDateIds, toDateId, todayLabel } from '../../hooks/useToday';
+import { currentWeekDateIds, useToday } from '../../hooks/useToday';
+import { currentWorkoutStreak } from '../../services/workoutStreak';
+import { useActiveWorkoutStore } from '../../store/useActiveWorkoutStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useUserProfileStore } from '../../store/useUserProfileStore';
 import { useThemedStyles } from '../../components/shared/ThemeProvider';
@@ -38,18 +44,18 @@ export default function Dashboard() {
   const { execute, isLoading: isGenerating } = useCallBackend();
   const [refreshing, setRefreshing] = useState(false);
 
-  const today = toDateId();
-  const weekDates = useMemo(() => currentWeekDateIds(), []);
+  const { dateId: today, date, dayLabel } = useToday();
+  const weekDates = currentWeekDateIds(date);
 
-  const { data: plan } = useFirestoreDoc(
+  const { data: plan, isLoading: planLoading, error: planError, retry: retryPlan } = useFirestoreDoc(
     user && userDoc?.currentPlanId
       ? `users/${user.uid}/workoutPlans/${userDoc.currentPlanId}`
       : null
   );
-  const { data: todayLog } = useFirestoreDoc(user ? `users/${user.uid}/dailyLogs/${today}` : null);
+  const { data: todayLog, isLoading: logLoading, error: logError, retry: retryLog } = useFirestoreDoc(user ? `users/${user.uid}/dailyLogs/${today}` : null);
 
   // One subscription covers the whole week's completion marks.
-  const { data: weekLogs } = useFirestoreCollection(
+  const { data: weekLogs, isLoading: weekLoading, error: weekError, retry: retryWeek } = useFirestoreCollection(
     user ? `users/${user.uid}/dailyLogs` : null,
     [where('date', '>=', weekDates[0]), where('date', '<=', weekDates[6])],
     `week:${weekDates[0]}`
@@ -57,9 +63,9 @@ export default function Dashboard() {
 
   const todaysPlanDay = useMemo(() => {
     if (!plan?.weeklySchedule) return null;
-    const label = todayLabel();
+    const label = dayLabel;
     return plan.weeklySchedule.find((d) => d.dayLabel === label) ?? null;
-  }, [plan]);
+  }, [plan, dayLabel]);
 
   const completedDays = useMemo(() => {
     const completedIds = new Set(
@@ -71,6 +77,7 @@ export default function Dashboard() {
   }, [weekLogs, weekDates]);
 
   const stats = userDoc?.stats ?? {};
+  const currentStreak = currentWorkoutStreak(stats, plan?.weeklySchedule, today);
   const targetDays = userDoc?.profile?.workoutDaysPerWeek ?? 7;
   const completedThisWeek = completedDays.filter(Boolean).length;
 
@@ -82,15 +89,33 @@ export default function Dashboard() {
 
   const firstName = (userDoc?.displayName || user?.displayName || 'there').split(' ')[0];
 
+  const retryData = () => Promise.all([retryPlan(), retryLog(), retryWeek()]);
   const onRefresh = async () => {
     setRefreshing(true);
-    // Subscriptions are already live; this is mostly a way to let the user
-    // force a visual beat after a cold start recovers.
-    setTimeout(() => setRefreshing(false), 600);
+    try { await retryData(); } catch { useUIStore.getState().showError('Refresh failed. Check your connection and try again.'); }
+    finally { setRefreshing(false); }
   };
 
-  const handleGeneratePlan = () =>
-    execute('/api/ai/generate-plan', { weekPreference: 4 }).catch(() => {});
+  const handleGeneratePlan = () => {
+    if (useActiveWorkoutStore.getState().isActive) {
+      Alert.alert('Workout in progress', 'Finish your current workout before generating a new plan.');
+      return;
+    }
+    const generate = () => execute('/api/ai/generate-plan', { weekPreference: 4 }).catch(() => {});
+    if (userDoc?.currentPlanId && plan) {
+      Alert.alert('Generate a new plan?', 'Your current plan will be replaced.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Generate', onPress: generate },
+      ]);
+    } else {
+      generate();
+    }
+  };
+
+  if (planError || logError || weekError) {
+    return <ReadError message="Could not load your dashboard." onRetry={retryData} />;
+  }
+  if (planLoading || logLoading || weekLoading) return <LoadingSpinner message="Loading your dashboard..." />;
 
   return (
     <View style={styles.flex}>
@@ -99,7 +124,7 @@ export default function Dashboard() {
         <View style={styles.statusRight}>
           <View style={styles.streakBadge}>
             <Icon name="flame" size={15} color={colors.brand.redText} />
-            <Text style={styles.streakCount}>{stats.currentStreakDays ?? 0}</Text>
+            <Text style={styles.streakCount}>{currentStreak}</Text>
           </View>
           <Pressable
             accessibilityRole="button"
@@ -118,7 +143,7 @@ export default function Dashboard() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <View>
-          <Eyebrow>{formatToday()}</Eyebrow>
+          <Eyebrow>{formatToday(date)}</Eyebrow>
           <Heading level={1} style={styles.greeting}>
             {greeting()},
           </Heading>
@@ -128,7 +153,7 @@ export default function Dashboard() {
         </View>
 
         <View style={styles.statRow}>
-          <StatTile value={formatStreak(stats.currentStreakDays ?? 0)} label="Streak" accent />
+          <StatTile value={formatStreak(currentStreak)} label="Streak" accent />
           <StatTile value={`${completedThisWeek} / ${targetDays}`} label="Workouts" />
           <StatTile value={caloriesToday ? caloriesToday.toLocaleString() : '—'} label="Calories" />
         </View>
@@ -147,15 +172,19 @@ export default function Dashboard() {
                 ? 'Your plan doesn’t have a session for today yet.'
                 : 'Generate your first AI workout plan to get started.'}
             </Text>
-            {!userDoc?.currentPlanId ? (
+            {!planLoading && !planError ? (
               <Button
-                label="GENERATE MY PLAN"
+                label={userDoc?.currentPlanId ? 'GENERATE NEW PLAN' : 'GENERATE MY PLAN'}
                 onPress={handleGeneratePlan}
                 loading={isGenerating}
               />
-            ) : null}
+            ) : planError ? <Text style={styles.noPlanCopy}>Could not load your plan. Check your connection and try again.</Text> : null}
           </Card>
         )}
+
+        {todaysPlanDay ? (
+          <Button label="GENERATE NEW PLAN" onPress={handleGeneratePlan} loading={isGenerating} />
+        ) : null}
 
         <View style={styles.splitRow}>
           <View style={styles.ringTile}>
@@ -198,7 +227,7 @@ export default function Dashboard() {
         onPress={() => router.push('/(tabs)/coach')}
         style={[styles.fab, { bottom: insets.bottom + 84 }]}
       >
-        <Icon name="coachActive" size={26} color="#FFFFFF" />
+        <Icon name="coachActive" size={26} color={colors.text.inverse} />
       </Pressable>
     </View>
   );
@@ -215,8 +244,8 @@ function greeting() {
   return 'GOOD EVENING';
 }
 
-function formatToday() {
-  return new Date()
+function formatToday(date) {
+  return date
     .toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
     .toUpperCase();
 }

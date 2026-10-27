@@ -115,7 +115,7 @@ export function SettingsSwitchRow({
         onValueChange={onValueChange}
         disabled={disabled}
         trackColor={{ true: colors.brand.red, false: colors.border.default }}
-        thumbColor="#FFFFFF"
+        thumbColor={colors.text.inverse}
       />
     </View>
   );

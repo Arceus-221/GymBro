@@ -19,6 +19,7 @@ export function ChatInputBar({
     <View style={styles.bar}>
       <Pressable
         onPress={onMicPress}
+        disabled={isTranscribing}
         style={[styles.mic, isRecording && styles.micActive]}
         accessibilityRole="button"
         accessibilityLabel={isRecording ? 'Stop recording' : 'Record a voice note'}
@@ -47,7 +48,7 @@ export function ChatInputBar({
         accessibilityRole="button"
         accessibilityLabel="Send message"
       >
-        <Icon name="send" size={17} color="#FFFFFF" />
+        <Icon name="send" size={17} color={colors.text.inverse} />
       </Pressable>
     </View>
   );

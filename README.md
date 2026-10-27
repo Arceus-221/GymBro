@@ -100,11 +100,13 @@ gymbro/
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22.13+ on the Node 22 line (recommended for both packages). Expo SDK 58
+  also supports Node 24.3+ on the Node 24 line and Node 26+; odd releases below 26
+  are unsupported. The backend alone still supports Node 20+.
 - A Firebase project (Firestore + Auth enabled) — create one for free at
   [console.firebase.google.com](https://console.firebase.google.com)
 - A Gemini API key (free tier) from [Google AI Studio](https://aistudio.google.com)
-- Expo CLI (`npm install -g expo-cli`) or just use `npx expo`
+- Expo CLI through the project's installed SDK: `npx expo`
 - Optional: a Groq API key (free tier) if you're working on the voice-note transcription
   fallback
 
@@ -136,7 +138,7 @@ npm run predeploy               # runs `firebase deploy --only firestore:rules`
 
 ### 3.2 Frontend (`gymbro-app/`)
 
-Expo SDK 57, expo-router, plain JavaScript. Already scaffolded — just install and run:
+Expo SDK 58, expo-router, plain JavaScript. Install and run:
 
 ```bash
 cd gymbro-app
@@ -146,11 +148,17 @@ cp .env.example .env.local
 npx expo start
 ```
 
-Scan the QR code with Expo Go, or press `i` / `a` for a simulator.
+Scan the QR code with an SDK 58-compatible Expo Go, or press `i` / `a` for a simulator.
+An older Expo Go cannot run the SDK 58 app; use a matching Expo Go or rebuild a
+development client after this upgrade.
 
-> `--legacy-peer-deps` is needed because expo-router pulls in a `react-dom` whose peer
-> range is a patch ahead of the `react` version Expo SDK 57 pins. It's inert for a native
-> build (nothing imports `react-dom`), but npm's strict resolver refuses the tree without it.
+> The package's `.npmrc` keeps `legacy-peer-deps` enabled so local installs and CI use
+> the same peer resolution mode. Web support remains a separate setup task.
+
+For phones on a different network from the computer, sign in with `npx expo login`,
+then run `npx expo start --tunnel`. SDK 58 uses Expo's authenticated tunnel by default.
+The installed `@expo/ngrok` dependency supports the legacy fallback:
+`npx expo start --tunnel ngrok`. Restart Metro with `--clear` after upgrading SDKs.
 
 **Firebase SDK choice:** the app uses the **Firebase JS SDK for both Auth and Firestore**,
 not `@react-native-firebase`. This is a deliberate deviation from Phase 3 SRS §3.3: the RN

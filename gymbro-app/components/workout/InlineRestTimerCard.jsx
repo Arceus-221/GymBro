@@ -5,14 +5,14 @@ import { useThemedStyles } from '../shared/ThemeProvider';
 
 /** In-flow rest timer — deliberately a card, not a blocking modal overlay. */
 export function InlineRestTimerCard({ secondsLeft, onSkip }) {
-  const { styles } = useThemedStyles(makeStyles);
+  const { styles, colors } = useThemedStyles(makeStyles);
   const minutes = Math.floor(secondsLeft / 60);
   const seconds = secondsLeft % 60;
 
   return (
     <View style={styles.card}>
       <View style={styles.labelRow}>
-        <Icon name="timer" size={14} color="#FFFFFF" />
+        <Icon name="timer" size={14} color={colors.text.inverse} />
         <Text style={styles.label}>REST TIMER</Text>
       </View>
       <Text style={styles.time}>{`${minutes}:${String(seconds).padStart(2, '0')}`}</Text>

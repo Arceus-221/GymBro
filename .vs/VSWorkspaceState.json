@@ -1,0 +1,16 @@
+{
+  "ExpandedNodes": [
+    "",
+    "\\gymbro-app",
+    "\\gymbro-app\\app",
+    "\\gymbro-app\\app\\(auth)",
+    "\\gymbro-app\\app\\(onboarding)",
+    "\\gymbro-app\\assets",
+    "\\gymbro-app\\components",
+    "\\gymbro-app\\constants",
+    "\\gymbro-app\\hooks",
+    "\\gymbro-app\\models"
+  ],
+  "SelectedNode": "\\gymbro-app\\models\\index.js",
+  "PreviewInSolutionExplorer": false
+}

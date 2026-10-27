@@ -4,6 +4,7 @@
 // validation, and normalized error codes (Phase 2 §7.2, extended Phase 5 §2.3).
 const { callGemini } = require('./geminiService');
 const { geminiLimiter } = require('./geminiRateLimiter');
+const { traceStage } = require('./requestTrace');
 
 const MAX_RETRIES = 1; // one retry only — mobile users won't wait through more
 const RETRY_DELAY_MS = 1200;
@@ -14,17 +15,27 @@ const callGeminiResilient = async (systemPrompt, userPrompt, maxTokens, validate
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const result = await geminiLimiter.schedule(() =>
-        callGemini(systemPrompt, userPrompt, maxTokens)
-      );
+      traceStage('ai-queued', { attempt: attempt + 1 });
+      const result = await geminiLimiter.schedule(async () => {
+        traceStage('provider-started', { attempt: attempt + 1 });
+        const output = await callGemini(systemPrompt, userPrompt, maxTokens);
+        traceStage('provider-returned', { attempt: attempt + 1 });
+        return output;
+      });
 
       if (validateShape && !validateShape(result)) {
         throw Object.assign(new Error('AI_SCHEMA_VIOLATION'), { code: 'AI_SCHEMA_VIOLATION' });
       }
 
+      traceStage('ai-complete');
       return result;
     } catch (error) {
       lastError = error;
+      traceStage('ai-attempt-failed', {
+        attempt: attempt + 1,
+        code: error.code ?? null,
+        status: error.response?.status ?? null,
+      });
 
       const isQueueOverflow = error.message?.includes('This job has been dropped');
       if (isQueueOverflow) {

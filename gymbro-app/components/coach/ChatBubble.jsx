@@ -16,7 +16,7 @@ export function ChatBubble({ role, content, pending, failed, onRetry, initial })
     <View style={[styles.row, isUser && styles.rowUser]}>
       {!isUser ? (
         <View style={styles.avatar}>
-          <Icon name="coachActive" size={17} color="#FFFFFF" />
+          <Icon name="coachActive" size={17} color={colors.text.inverse} />
         </View>
       ) : null}
 

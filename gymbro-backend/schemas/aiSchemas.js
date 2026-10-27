@@ -46,6 +46,30 @@ const recoveryScoreRequestSchema = z.object({
   moodRating: z.number().int().min(1).max(5),
 });
 
+// One meal as it sits in a plan document. Shared by the two endpoints that
+// take a plan meal as input. Macros are bounded to catch garbage rather than
+// to enforce nutrition — a 5000 kcal single meal is a client bug, not a diet.
+const planMealSchema = z.object({
+  mealType: z.enum(MEAL_TYPES),
+  description: nonEmptyTrimmedString(300, 'meal.description'),
+  calories: z.number().min(0).max(5000),
+  proteinG: z.number().min(0).max(500),
+  carbsG: z.number().min(0).max(1000),
+  fatsG: z.number().min(0).max(500),
+});
+
+const mealDetailRequestSchema = z.object({
+  meal: planMealSchema,
+  // ISO 4217. The client derives it from the device locale; the backend only
+  // passes it through to the prompt, so a strict shape is all that matters.
+  currency: z.string().regex(/^[A-Z]{3}$/, 'currency must be a 3-letter ISO code'),
+});
+
+const substituteMealRequestSchema = z.object({
+  meal: planMealSchema,
+  reason: nonEmptyTrimmedString(300, 'reason').optional(),
+});
+
 const substituteExerciseRequestSchema = z.object({
   exerciseName: nonEmptyTrimmedString(100, 'exerciseName'),
   reason: nonEmptyTrimmedString(300, 'reason'),
@@ -66,5 +90,7 @@ module.exports = {
   estimateNutritionRequestSchema,
   recoveryScoreRequestSchema,
   substituteExerciseRequestSchema,
+  mealDetailRequestSchema,
+  substituteMealRequestSchema,
   chatRequestSchema,
 };

@@ -1,14 +1,17 @@
 import NetInfo from '@react-native-community/netinfo';
 import { Slot, useRootNavigationState, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { useEffect, useRef } from 'react';
-import { AppState, StyleSheet, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ErrorToast } from '../components/shared/ErrorToast';
 import { OfflineBanner } from '../components/shared/OfflineBanner';
 
+import { useActiveWorkoutStore } from '../store/useActiveWorkoutStore';
+import { useOnboardingDraftStore } from '../store/useOnboardingDraftStore';
+import { ensureUserDocument } from '../services/userProvisioning';
 import { wakeBackend } from '../services/apiClient';
 import { auth, db } from '../services/firebase';
 import { useAuthStore } from '../store/useAuthStore';
@@ -24,6 +27,7 @@ export default function RootLayout() {
   const clearProfile = useUserProfileStore((s) => s.clear);
   const setOnline = useConnectivityStore((s) => s.setOnline);
   const lastWakeRef = useRef(0);
+  const [profileAttempt, setProfileAttempt] = useState(0);
 
   // Layer 1 of cold-start handling: start Render's container booting during
   // splash/auth time rather than at the user's first real AI request.
@@ -48,29 +52,58 @@ export default function RootLayout() {
     return unsub;
   }, [setOnline]);
 
-  useEffect(() => onAuthStateChanged(auth, setUser), [setUser]);
+  useEffect(() => onAuthStateChanged(auth, (nextUser) => {
+    const previousUid = useAuthStore.getState().user?.uid ?? null;
+    if (previousUid !== (nextUser?.uid ?? null)) {
+      useActiveWorkoutStore.getState().endSession();
+      useOnboardingDraftStore.getState().reset();
+      clearProfile();
+    }
+    setUser(nextUser);
+  }), [setUser, clearProfile]);
 
   // One shared subscription to users/{uid} for the whole app — screens read it
   // from the store instead of each opening their own listener.
   const user = useAuthStore((s) => s.user);
+  const isOnline = useConnectivityStore((s) => s.isOnline);
   useEffect(() => {
-    if (!user) {
-      clearProfile();
-      return undefined;
-    }
-    return onSnapshot(
+    if (!user) return undefined;
+    let active = true;
+    let seenExisting = false;
+    let provisioning = false;
+    useUserProfileStore.getState().clear();
+    const unsubscribe = onSnapshot(
       doc(db, 'users', user.uid),
-      (snap) => setUserDoc(snap.exists() ? { id: snap.id, ...snap.data() } : null),
-      () => setUserDoc(null)
+      { includeMetadataChanges: true },
+      (snap) => {
+        if (!active) return;
+        if (snap.exists()) {
+          seenExisting = true;
+          setUserDoc({ id: snap.id, ...snap.data() });
+        } else if (snap.metadata.fromCache && !isOnline && !seenExisting) {
+          useUserProfileStore.getState().setError('Your profile is not cached. Connect to the internet and retry.');
+        } else if (!snap.metadata.fromCache && !seenExisting && !provisioning) {
+          provisioning = true;
+          ensureUserDocument(user).catch(() => {
+            if (active) useUserProfileStore.getState().setError('Could not create your profile. Check your connection and try again.');
+          });
+        } else if (!snap.metadata.fromCache && seenExisting) {
+          useUserProfileStore.getState().setError('Your profile is unavailable.');
+        }
+      },
+      () => {
+        if (active) useUserProfileStore.getState().setError('Could not load your profile. Check your connection and try again.');
+      }
     );
-  }, [user, setUserDoc, clearProfile]);
+    return () => { active = false; unsubscribe(); };
+  }, [user, setUserDoc, profileAttempt, isOnline]);
 
   useProtectedRoute();
 
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <ThemedShell />
+        <ThemedShell onRetryProfile={() => setProfileAttempt((n) => n + 1)} />
       </ThemeProvider>
     </SafeAreaProvider>
   );
@@ -80,8 +113,10 @@ export default function RootLayout() {
  * Everything that reads the theme lives below the provider. Split out of
  * RootLayout because a component cannot consume a context it renders itself.
  */
-function ThemedShell() {
+function ThemedShell({ onRetryProfile }) {
   const { styles, scheme } = useThemedStyles(makeStyles);
+  const user = useAuthStore((s) => s.user);
+  const profileError = useUserProfileStore((s) => s.error);
 
   return (
     <>
@@ -93,7 +128,13 @@ function ThemedShell() {
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
       <View style={styles.root}>
         <OfflineBanner />
-        <Slot />
+        {user && profileError ? (
+          <View style={styles.profileError}>
+            <Text>{profileError}</Text>
+            <Pressable onPress={onRetryProfile}><Text>TRY AGAIN</Text></Pressable>
+            <Pressable onPress={() => signOut(auth)}><Text>SIGN OUT</Text></Pressable>
+          </View>
+        ) : <Slot key={user?.uid ?? 'signed-out'} />}
         <ErrorToast />
       </View>
     </>
@@ -149,4 +190,5 @@ function useProtectedRoute() {
 
 const makeStyles = (colors) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.surface.primary },
+  profileError: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, gap: 20 },
 });

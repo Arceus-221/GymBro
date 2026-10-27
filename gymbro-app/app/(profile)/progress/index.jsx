@@ -1,16 +1,16 @@
 import { useRouter } from 'expo-router';
-import { collectionGroup, getDocs, orderBy, query, where } from 'firebase/firestore';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { collection, getDocsFromServer, orderBy, query, where } from 'firebase/firestore';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PRTrackerTable } from '../../../components/progress/PRTrackerTable';
 import { VolumeBarChart } from '../../../components/progress/VolumeBarChart';
-import { Card } from '../../../components/shared/Card';
 import { Icon } from '../../../components/shared/Icon';
+import { ReadError } from '../../../components/shared/ReadError';
 import { LoadingSpinner } from '../../../components/shared/LoadingSpinner';
 import { Eyebrow, Heading } from '../../../components/shared/Typography';
 import { radius, spacing, typography } from '../../../constants/theme';
-import { toDateId } from '../../../hooks/useToday';
+import { toDateId, useToday } from '../../../hooks/useToday';
 import { db } from '../../../services/firebase';
 import { useAuthStore } from '../../../store/useAuthStore';
 import { useUserProfileStore } from '../../../store/useUserProfileStore';
@@ -26,53 +26,54 @@ const RANGES = [
 /**
  * The one screen that reads across many dailyLogs documents. Fetched once with
  * manual refresh rather than a live subscription — there are no writes here,
- * and a 6-month collection-group listener would be needlessly expensive.
+ * and a 6-month collection listener would be needlessly expensive.
  */
 export default function Progress() {
-  const { styles } = useThemedStyles(makeStyles);
+  const { styles, colors } = useThemedStyles(makeStyles);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const user = useAuthStore((s) => s.user);
   const userDoc = useUserProfileStore((s) => s.userDoc);
 
+  const { dateId: today } = useToday();
   const [rangeIndex, setRangeIndex] = useState(1);
   const [logs, setLogs] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [loadedKey, setLoadedKey] = useState(null);
+  const requestVersion = useRef(0);
 
   const rangeStart = useMemo(() => {
-    const start = new Date();
+    const start = new Date(`${today}T12:00:00`);
     start.setMonth(start.getMonth() - RANGES[rangeIndex].months);
     return toDateId(start);
-  }, [rangeIndex]);
+  }, [rangeIndex, today]);
 
+  const resourceKey = `${user?.uid ?? ''}:${rangeStart}`;
   const fetchLogs = useCallback(async () => {
     if (!user) return;
+    const version = ++requestVersion.current;
     setIsLoading(true);
     setError(null);
     try {
-      // The redundant `uid` field on every dailyLogs document exists precisely
-      // to make this collection-group query possible (Phase 1 §2).
-      const snapshot = await getDocs(
-        query(
-          collectionGroup(db, 'dailyLogs'),
-          where('uid', '==', user.uid),
-          where('date', '>=', rangeStart),
-          orderBy('date', 'asc')
-        )
-      );
-      setLogs(snapshot.docs.map((d) => d.data()));
+      const snapshot = await getDocsFromServer(query(
+        collection(db, 'users', user.uid, 'dailyLogs'),
+        where('date', '>=', rangeStart), orderBy('date', 'asc')
+      ));
+      if (version !== requestVersion.current) return;
+      setLogs(snapshot.docs.map((item) => item.data()));
+      setLoadedKey(resourceKey);
     } catch (err) {
-      // A missing composite index surfaces here as failed-precondition; the
-      // console error carries a direct link to create it.
-      setError(err?.message ?? 'Could not load progress data.');
+      if (version === requestVersion.current) { setError(err); setLoadedKey(resourceKey); }
+      throw err;
     } finally {
-      setIsLoading(false);
+      if (version === requestVersion.current) setIsLoading(false);
     }
-  }, [user, rangeStart]);
+  }, [user, rangeStart, resourceKey]);
 
   useEffect(() => {
-    fetchLogs();
+    fetchLogs().catch(() => {});
+    return () => { requestVersion.current += 1; };
   }, [fetchLogs]);
 
   const { personalRecords, volumeByMuscle, totalSessions } = useMemo(
@@ -84,11 +85,11 @@ export default function Progress() {
     <View style={styles.flex}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Pressable onPress={() => router.back()} hitSlop={10} accessibilityLabel="Go back">
-          <Icon name="back" size={22} color="#FFFFFF" />
+          <Icon name="back" size={22} color={colors.text.inverse} />
         </Pressable>
         <Text style={styles.headerTitle}>PROGRESS</Text>
-        <Pressable onPress={fetchLogs} hitSlop={10} accessibilityLabel="Refresh">
-          <Icon name="refresh" size={20} color="#FFFFFF" />
+        <Pressable onPress={() => fetchLogs().catch(() => {})} hitSlop={10} accessibilityLabel="Refresh">
+          <Icon name="refresh" size={20} color={colors.text.inverse} />
         </Pressable>
       </View>
 
@@ -107,13 +108,10 @@ export default function Progress() {
           ))}
         </View>
 
-        {isLoading ? (
+        {isLoading || loadedKey !== resourceKey ? (
           <LoadingSpinner message="Crunching your history..." />
         ) : error ? (
-          <Card style={styles.errorCard}>
-            <Eyebrow>Couldn’t load progress</Eyebrow>
-            <Text style={styles.errorText}>{error}</Text>
-          </Card>
+          <ReadError message="Could not load progress data." onRetry={fetchLogs} />
         ) : (
           <>
             <View style={styles.statRow}>

@@ -18,7 +18,7 @@ export function OfflineBanner() {
 
   return (
     <View style={[styles.banner, { paddingTop: insets.top + 6 }]}>
-      <Text style={styles.text}>Offline — changes will sync when reconnected</Text>
+      <Text style={styles.text}>Offline - some actions need a connection</Text>
     </View>
   );
 }

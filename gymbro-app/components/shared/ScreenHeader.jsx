@@ -13,7 +13,7 @@ import { useThemedStyles } from './ThemeProvider';
  *   `icon` is a name from components/shared/Icon.jsx
  */
 export function ScreenHeader({ title, onBack, action = null }) {
-  const { styles } = useThemedStyles(makeStyles);
+  const { styles, colors } = useThemedStyles(makeStyles);
   const insets = useSafeAreaInsets();
 
   return (
@@ -25,7 +25,7 @@ export function ScreenHeader({ title, onBack, action = null }) {
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
-          <Icon name="back" size={22} color="#FFFFFF" />
+          <Icon name="back" size={22} color={colors.text.inverse} />
         </Pressable>
       ) : (
         <View style={styles.spacer} />
@@ -42,7 +42,7 @@ export function ScreenHeader({ title, onBack, action = null }) {
           accessibilityRole="button"
           accessibilityLabel={action.label}
         >
-          <Icon name={action.icon} size={22} color="#FFFFFF" />
+          <Icon name={action.icon} size={22} color={colors.text.inverse} />
         </Pressable>
       ) : (
         <View style={styles.spacer} />

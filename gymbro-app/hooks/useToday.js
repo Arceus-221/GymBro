@@ -1,3 +1,6 @@
+import { useEffect, useState } from 'react';
+import { AppState } from 'react-native';
+
 /**
  * Date helpers shared by every screen that touches dailyLogs, whose document
  * IDs are local-date strings (Phase 1 §2). Using toISOString() here would be a
@@ -38,4 +41,29 @@ export function currentWeekDateIds(date = new Date()) {
     d.setDate(monday.getDate() + i);
     return toDateId(d);
   });
+}
+
+/** Local calendar date refreshed at midnight, on foreground, and after clock/timezone changes. */
+export function useToday() {
+  const [dateId, setDateId] = useState(() => toDateId());
+  useEffect(() => {
+    let timer;
+    const refresh = () => {
+      setDateId(toDateId());
+      clearTimeout(timer);
+      const now = new Date();
+      const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      timer = setTimeout(refresh, midnight.getTime() - now.getTime() + 50);
+    };
+    refresh();
+    // Foreground refresh handles background suspension; the periodic check also
+    // notices time-zone or clock changes while the app stays open.
+    const interval = setInterval(refresh, 60000);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refresh();
+    });
+    return () => { clearTimeout(timer); clearInterval(interval); subscription.remove(); };
+  }, []);
+  const [year, month, day] = dateId.split('-').map(Number);
+  return { dateId, date: new Date(year, month - 1, day, 12), dayLabel: todayLabel(new Date(year, month - 1, day, 12)) };
 }

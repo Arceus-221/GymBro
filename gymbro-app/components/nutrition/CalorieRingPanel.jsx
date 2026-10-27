@@ -39,9 +39,9 @@ export function CalorieRingPanel({ totals, targets }) {
         <Text style={styles.target}>
           {`Daily Target: ${targets.calories.toLocaleString()}  ·  ${percent}%`}
         </Text>
-        <MacroBar label="Carbs" value={totals?.carbsG ?? 0} target={targets.carbsG} color="#F5A524" />
+        <MacroBar label="Carbs" value={totals?.carbsG ?? 0} target={targets.carbsG} color={colors.macro.carbs} />
         <MacroBar label="Protein" value={totals?.proteinG ?? 0} target={targets.proteinG} color={colors.brand.redText} />
-        <MacroBar label="Fat" value={totals?.fatsG ?? 0} target={targets.fatsG} color="#3B82F6" />
+        <MacroBar label="Fat" value={totals?.fatsG ?? 0} target={targets.fatsG} color={colors.macro.fat} />
       </View>
     </View>
   );

@@ -14,6 +14,8 @@ const {
   estimateNutritionRequestSchema,
   recoveryScoreRequestSchema,
   substituteExerciseRequestSchema,
+  mealDetailRequestSchema,
+  substituteMealRequestSchema,
   chatRequestSchema,
 } = require('../schemas/aiSchemas');
 
@@ -59,6 +61,22 @@ router.post(
   perUserThrottle,
   validateBody(recoveryScoreRequestSchema),
   aiController.computeRecoveryScore
+);
+
+router.post(
+  '/meal-detail',
+  verifyToken,
+  perUserThrottle,
+  validateBody(mealDetailRequestSchema),
+  mealPlanController.getMealDetail
+);
+
+router.post(
+  '/substitute-meal',
+  verifyToken,
+  perUserThrottle,
+  validateBody(substituteMealRequestSchema),
+  mealPlanController.substituteMeal
 );
 
 router.post(

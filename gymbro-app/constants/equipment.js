@@ -49,3 +49,10 @@ export const MEAL_TYPES = [
   { value: 'pre_workout', label: 'Pre-Workout' },
   { value: 'post_workout', label: 'Post-Workout' },
 ];
+
+/** Toggle equipment while keeping bodyweight-only exclusive. */
+export function toggleEquipmentSelection(current, value) {
+  if (value === 'bodyweight_only') return current.includes(value) ? [] : [value];
+  const choices = current.filter((item) => item !== 'bodyweight_only');
+  return choices.includes(value) ? choices.filter((item) => item !== value) : [...choices, value];
+}

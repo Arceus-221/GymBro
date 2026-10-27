@@ -1,4 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { collection, doc } from 'firebase/firestore';
+import { db } from '../../services/firebase';
+import { createRequestVersion } from '../../services/requestVersion';
+import { useUIStore } from '../../store/useUIStore';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -28,54 +32,100 @@ import { useThemedStyles } from '../shared/ThemeProvider';
  */
 export function AddMealSheet({ visible, onClose, onSave }) {
   const { styles, colors } = useThemedStyles(makeStyles);
-  const { execute, isLoading, loadingHint } = useCallBackend();
-  const voice = useVoiceCapture();
+  const { execute, loadingHint } = useCallBackend();
+  const showError = useUIStore((state) => state.showError);
+  const [requestVersion] = useState(createRequestVersion);
+  const [isEstimating, setIsEstimating] = useState(false);
+  const voice = useVoiceCapture({
+    enabled: visible,
+    onAutoTranscript: (transcript) => {
+      requestVersion.invalidate();
+      setEstimate(null);
+      setIsEstimating(false);
+      operationId.current = null;
+      setDescription((prev) => (prev ? `${prev} ${transcript}` : transcript));
+    },
+  });
   const [mealType, setMealType] = useState('breakfast');
   const [description, setDescription] = useState('');
   const [estimate, setEstimate] = useState(null);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const operationId = useRef(null);
 
+  useEffect(() => () => requestVersion.invalidate(), [visible, requestVersion]);
+
+  const invalidateEstimate = () => {
+    requestVersion.invalidate();
+    setEstimate(null);
+    setIsEstimating(false);
+    operationId.current = null;
+  };
+  const close = () => {
+    if (savingRef.current) return;
+    requestVersion.invalidate();
+    setIsEstimating(false);
+    onClose();
+  };
   const reset = () => {
+    invalidateEstimate();
     setDescription('');
     setEstimate(null);
     setMealType('breakfast');
+    operationId.current = null;
   };
 
   const handleEstimate = async () => {
-    if (!description.trim()) return;
+    if (!description.trim() || isEstimating || savingRef.current) return;
+    const token = requestVersion.next();
+    setIsEstimating(true);
+    setEstimate(null);
     try {
       const result = await execute('/api/ai/estimate-nutrition', {
-        mealDescription: description.trim(),
-        mealType,
-      });
-      setEstimate(result.data);
-    } catch {
-      // useCallBackend already surfaced the toast.
+        mealDescription: description.trim(), mealType,
+      }, { silent: true });
+      if (requestVersion.isCurrent(token)) setEstimate(result.data);
+    } catch (error) {
+      if (requestVersion.isCurrent(token)) showError(error.message || 'Could not estimate this meal.');
+    } finally {
+      if (requestVersion.isCurrent(token)) setIsEstimating(false);
     }
   };
 
   const handleSave = async () => {
+    if (savingRef.current || !estimate) return;
+    savingRef.current = true;
+    if (!operationId.current) operationId.current = doc(collection(db, 'mealOperationIds')).id;
     setSaving(true);
     try {
-      await onSave({ mealType, userDescription: description.trim(), aiEstimate: estimate });
+      await onSave({ mealType, userDescription: description.trim(), aiEstimate: estimate, operationId: operationId.current });
       reset();
       onClose();
+    } catch {
+      // The caller displays the error; keep the draft for retry.
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
 
   const handleMic = async () => {
+    if (savingRef.current || voice.isTranscribing) return;
     if (voice.isRecording) {
+      invalidateEstimate();
+      const token = requestVersion.next();
       const transcript = await voice.stopAndTranscribe();
-      if (transcript) setDescription((prev) => (prev ? `${prev} ${transcript}` : transcript));
+      if (transcript && requestVersion.isCurrent(token)) {
+        setDescription((prev) => (prev ? `${prev} ${transcript}` : transcript));
+      }
     } else {
+      invalidateEstimate();
       await voice.startRecording();
     }
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
       {/*
         The sheet is pinned to the bottom, so without this the iOS keyboard
         covers the description field the user is typing into (F2). Same idiom
@@ -101,8 +151,9 @@ export function AddMealSheet({ visible, onClose, onSave }) {
               options={MEAL_TYPES}
               value={mealType}
               onChange={(v) => {
+                if (savingRef.current) return;
+                invalidateEstimate();
                 setMealType(v);
-                setEstimate(null);
               }}
             />
 
@@ -110,16 +161,19 @@ export function AddMealSheet({ visible, onClose, onSave }) {
               <TextInput
                 value={description}
                 onChangeText={(t) => {
+                  if (savingRef.current) return;
+                  invalidateEstimate();
                   setDescription(t);
-                  setEstimate(null);
                 }}
                 placeholder="1 cup rice, chicken curry, 1 banana"
                 placeholderTextColor={colors.text.faint}
                 multiline
+                editable={!saving}
                 style={styles.input}
               />
               <Pressable
                 onPress={handleMic}
+                disabled={voice.isTranscribing || saving}
                 style={[styles.mic, voice.isRecording && styles.micActive]}
                 accessibilityRole="button"
                 accessibilityLabel={voice.isRecording ? 'Stop recording' : 'Record a voice note'}
@@ -155,19 +209,19 @@ export function AddMealSheet({ visible, onClose, onSave }) {
 
             {estimate ? (
               <View style={styles.actions}>
-                <Button label="DISCARD" variant="ghost" onPress={reset} style={styles.flex} />
+                <Button label="DISCARD" variant="ghost" disabled={saving} onPress={reset} style={styles.flex} />
                 <Button label="SAVE" onPress={handleSave} loading={saving} style={styles.flex} />
               </View>
             ) : (
               <Button
-                label={loadingHint === 'waking' ? 'WAKING COACH UP…' : 'ESTIMATE MACROS'}
+                label={loadingHint === 'slow' ? 'STILL WORKING...' : 'ESTIMATE MACROS'}
                 onPress={handleEstimate}
-                loading={isLoading}
-                disabled={!description.trim()}
+                loading={isEstimating}
+                disabled={!description.trim() || voice.isRecording || voice.isTranscribing || saving}
               />
             )}
 
-            <Pressable onPress={onClose} hitSlop={8}>
+            <Pressable onPress={close} disabled={saving} hitSlop={8}>
               <Text style={styles.cancel}>Cancel</Text>
             </Pressable>
           </ScrollView>

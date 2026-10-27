@@ -2,6 +2,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const { traceRequest } = require('./services/requestTrace');
 
 const aiRoutes = require('./routes/ai');
 const audioRoutes = require('./routes/audio');
@@ -9,6 +10,7 @@ const audioRoutes = require('./routes/audio');
 const app = express();
 
 // Middleware
+app.use(traceRequest);
 app.use(cors({
   origin: '*', // Tighten this in production to your app's domain if using a web build
 }));

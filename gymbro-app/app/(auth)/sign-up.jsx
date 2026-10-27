@@ -1,13 +1,13 @@
 import { Link } from 'expo-router';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { AuthShell, Field } from '../../components/shared/AuthShell';
 import { Button } from '../../components/shared/Button';
 import { spacing, typography } from '../../constants/theme';
 import { authErrorMessage } from '../../services/authErrors';
-import { auth, db } from '../../services/firebase';
+import { auth } from '../../services/firebase';
+import { ensureUserDocument } from '../../services/userProvisioning';
 import { useThemedStyles } from '../../components/shared/ThemeProvider';
 
 export default function SignUp() {
@@ -32,31 +32,11 @@ export default function SignUp() {
     setError(null);
     try {
       const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-      const { uid } = credential.user;
       await updateProfile(credential.user, { displayName: displayName.trim() });
-
-      // The root user document. `uid` must be present for the security rules'
-      // create condition to pass (Phase 1 §3H).
-      await setDoc(doc(db, 'users', uid), {
-        uid,
-        displayName: displayName.trim(),
-        email: email.trim(),
-        photoURL: null,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        onboardingComplete: false,
-        currentPlanId: null,
-        currentMealPlanId: null,
-        stats: {
-          totalWorkoutsCompleted: 0,
-          currentStreakDays: 0,
-          longestStreakDays: 0,
-          lastWorkoutDate: null,
-        },
-      });
+      await ensureUserDocument(credential.user, displayName.trim());
       // Root layout routes to onboarding once the doc lands.
     } catch (err) {
-      setError(authErrorMessage(err));
+      setError(auth.currentUser ? 'Your account was created, but setup could not finish. Retry profile setup or sign in again.' : authErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }

@@ -14,7 +14,7 @@ import { useThemedStyles } from '../shared/ThemeProvider';
  * ALWAYS stored as kg — `set.weightKg` is written straight to Firestore, so a
  * display value must never reach it unconverted (see constants/units.js).
  */
-export function SetLogTable({ sets, currentSetIndex, onChangeSet }) {
+export function SetLogTable({ sets, targetUnit = 'reps', currentSetIndex, onChangeSet }) {
   const { styles, colors } = useThemedStyles(makeStyles);
   const weightUnit = useSettingsStore((s) => s.weightUnit);
 
@@ -50,7 +50,7 @@ export function SetLogTable({ sets, currentSetIndex, onChangeSet }) {
     <View style={styles.table}>
       <View style={styles.headerRow}>
         <Text style={[styles.header, styles.colSet]}>SET</Text>
-        <Text style={[styles.header, styles.colInput]}>REPS</Text>
+        <Text style={[styles.header, styles.colInput]}>{targetUnit === 'seconds' ? 'SECONDS' : targetUnit === 'meters' ? 'METERS' : 'REPS'}</Text>
         <Text style={[styles.header, styles.colInput]}>{weightUnit.toUpperCase()}</Text>
         <Text style={[styles.header, styles.colStatus]}>STATUS</Text>
       </View>
@@ -65,9 +65,9 @@ export function SetLogTable({ sets, currentSetIndex, onChangeSet }) {
             <Text style={[styles.cell, styles.colSet]}>{set.setNumber}</Text>
 
             <TextInput
-              value={set.repsCompleted ? String(set.repsCompleted) : ''}
+              value={(targetUnit === 'reps' ? set.repsCompleted : set.targetCompleted) ? String(targetUnit === 'reps' ? set.repsCompleted : set.targetCompleted) : ''}
               onChangeText={(t) =>
-                onChangeSet(index, { repsCompleted: Number(t.replace(/[^0-9]/g, '')) || 0 })
+                onChangeSet(index, { [targetUnit === 'reps' ? 'repsCompleted' : 'targetCompleted']: Number(t.replace(/[^0-9]/g, '')) || 0 })
               }
               keyboardType="number-pad"
               style={[styles.input, styles.colInput]}

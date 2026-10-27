@@ -12,6 +12,8 @@ const TOKEN_LIMITS = {
   RECOVERY: 1000,
   PLAN_RESTRUCTURE: 2500,
   MEAL_PLANNER: 4500,
+  MEAL_DETAIL: 1500,     // one recipe: ~8 ingredients + ~8 steps + a tip
+  SUBSTITUTE_MEAL: 1200, // 3 alternatives, one sentence each
 };
 
 const PROVIDERS = {

@@ -5,6 +5,195 @@ the actual codebase (not just what the docs claim). New entries go on top.
 
 ---
 
+## 2026-10-25 — Shared AI timeout: stale local backend address
+
+The phone app's `.env.local` pointed at `http://172.20.10.5:3001`, while the PC's
+current Wi-Fi address was `172.16.132.180`. Requests to the old address timed out;
+the backend itself was running on port 3001. Updated the local backend URL and
+restarted Expo with a clean Metro cache.
+
+Verified the corrected `/health` from both the PC and the user's phone, and the
+AI route returned the expected 401 to an unauthenticated probe. The rebuilt iOS
+bundle contains the corrected address and no longer contains the stale one.
+A single diagnostic Gemini request with no user data returned valid JSON in
+approximately 3.1 seconds. The user was asked to retry AI in the reloaded app;
+authenticated feature requests remain a separate end-to-end verification.
+
+The local environment file is git-ignored. Its backend address must track the PC's
+network when developing over LAN; a hosted HTTPS backend avoids that dependency.
+
+---
+
+## 2026-10-25 — Expo SDK 58 upgrade
+
+Upgraded the frontend from SDK 57 to **Expo 58.0.19**, **React Native 0.88.0**,
+**React 19.3.0**, and **Expo Router 58.0.26**. Aligned the remaining Expo/native
+dependencies with `expo install --fix` and saved their resolution in the lockfile.
+Added direct native peers `expo-font`, `expo-asset`, and `react-native-worklets` so
+icons, audio, and Reanimated have their required modules outside Expo Go as well.
+
+Removed the obsolete `newArchEnabled` app-config field. Replaced the legacy top-level
+`splash` field with the `expo-splash-screen` plugin, retaining the existing image,
+contain resize mode, and background color, with an explicit 200-point image width.
+Expo's installer also registered the status-bar, font, and asset config plugins.
+
+The app now declares SDK 58's supported Node versions; frontend CI uses Node 22
+instead of Node 20. README setup instructions describe the new runtime requirements,
+SDK 58-compatible Expo Go/development builds, and tunneling. The existing ngrok
+dependency remains available through `expo start --tunnel ngrok`; plain `--tunnel`
+now uses Expo's authenticated tunnel and requires an Expo login.
+
+Verification:
+
+- `npx expo-doctor`: **20/20 checks pass** after the config migrations.
+- `npx expo install --check`: **dependencies up to date** after alignment; subsequent
+  peer/splash dependencies were installed using the SDK's version resolver and
+  checked by the final Doctor run.
+- `npm run lint`: **0 errors, 15 existing warnings**.
+- `npm run typecheck`: **passes**, with the existing `checkJs: false` limitation.
+- `npx expo export --platform ios --platform android`: **both bundles export**
+  successfully with SDK 58 and the native peers installed (approximately 5 MB each).
+- No imports/usages of the removed React Native APIs or custom Router APIs were
+  found in application source. No application behavior refactor was required.
+
+No physical-device launch or native release build was performed. Splash appearance,
+native behavior, and Expo Go compatibility on the user's installed client still need
+device verification. No development server was started as part of this upgrade.
+
+---
+
+## 2026-09-15 — Meal plan: log, recipe with prices, swap (F16 + F17)
+
+**Scope:** The three meal-plan gaps filed as feature requests in `FRONTEND_FIX_LOG.md` —
+a generated plan could not be logged into the day's tracking, had no recipe or cost
+detail, and could not be edited. Two new backend endpoints, one new screen, and the plan
+document becomes editable from the client. Uncommitted at time of writing.
+
+### Log a plan meal (F16)
+
+Every plan card has a LOG toggle, and the meal detail screen has a full-width one. Tapping
+it writes the meal into `dailyLogs/{today}.nutritionLog.meals` with the plan's known macros
+as `aiEstimate` — **no AI call**, the numbers already exist. Tapping again removes it.
+
+Logged entries now carry `source: 'plan' | 'manual'` and, for plan meals, a
+`plannedMealKey`. The key is **positional** — `${dayLabel}:${mealType}:${index}` — because
+plan meals have no id of their own and the same dish can legitimately appear twice in a
+week. It is what lets a card show as logged and be un-logged by identity rather than by
+matching text. The "Logged Today" list tags plan-sourced entries FROM PLAN.
+
+The write moved out of the Nutrition screen into `services/nutritionLogActions.js` so the
+detail screen can share it rather than duplicate it.
+
+### Recipe with estimated prices
+
+Opening a plan meal shows ingredients with quantities and estimated prices, a per-recipe
+total, numbered method, prep/cook time, and an optional coach tip.
+
+**Detail is generated on demand, not with the plan.** 21 meals' worth of ingredients and
+steps would exceed `TOKEN_LIMITS.MEAL_PLANNER` (4,500) several times over and make plan
+generation slow for content most meals never need. Instead `POST /api/ai/meal-detail`
+expands one meal (`TOKEN_LIMITS.MEAL_DETAIL` = 1,500), and the client **caches the result
+onto the meal inside the plan document** — so each meal costs at most one call over its
+lifetime, and the recipe travels with the plan and is dropped with it.
+
+**Currency comes from the device locale** via `expo-localization`, sent per request the way
+`availableEquipment` is for exercise substitution. It is a display preference, not profile
+data, so it is deliberately not stored in `users/{uid}`. The backend validates it as a
+3-letter ISO code and passes it to the prompt; the AI prices the quantity used, not the
+package bought. Prices render through `Intl.NumberFormat` and are labelled as estimates.
+
+### Swap a meal (F17)
+
+A swap sheet asks for an optional reason and calls `POST /api/ai/substitute-meal`, which
+returns **3 alternatives that hold the slot's macros** — within ~10% of calories and ~15%
+of protein, ordered closest-first — with a one-sentence "why it fits" each. Dietary
+preference and medical notes are read **server-side from the profile**, never trusted from
+the request, matching how `generate-meal-plan` works.
+
+Picking one writes the new meal into the plan document directly from the client.
+`firestore.rules` already grants the owner `update` on `mealPlans`, so **editing needs no
+backend round trip — only proposing does**. Firestore cannot address one element of a
+nested array, so every edit rewrites `weeklyMealSchedule` whole; the document is small and
+single-writer, so that is fine. A swap drops the old meal's cached `detail`, since it
+described a different dish, and the detail screen — which reads the plan live —
+refetches for the new one.
+
+The alternatives request fires as soon as the sheet opens rather than waiting for a
+reason: most swaps are "something else, please", and a reason should refine results, not
+gate them.
+
+### Backend
+
+| Piece | Where |
+|---|---|
+| Prompts | `prompts/mealDetailPrompts.js`, `prompts/substituteMealPrompts.js` |
+| Handlers + validators | `controllers/mealPlanController.js` (`getMealDetail`, `substituteMeal`) |
+| Request schemas | `schemas/aiSchemas.js` (`planMealSchema`, shared by both) |
+| Routes | `routes/ai.js` — auth → throttle → validate → controller, same as every route |
+| Token ceilings | `MEAL_DETAIL: 1500`, `SUBSTITUTE_MEAL: 1200` |
+
+Both prompts carry the same dietary-preference rules and `<<<USER_INPUT>>>` injection
+guard as the plan prompt. The backend re-stamps `currency` on the detail response rather
+than trusting the model to echo it.
+
+**Tests: 4 → 9.** Both new routes are covered for the auth gate; `meal-detail` for a bad
+currency and an unknown `mealType`; `substitute-meal` for a missing meal. Two things
+learned writing them: Jest requires a `mock` prefix on any variable a `jest.mock()` factory
+closes over, and `perUserThrottle` keeps a 2s per-uid floor in memory — so validation tests
+behind a "valid" token must each mint a distinct uid or the second is answered 429 before
+its body is read. That throttle behaviour is correct; the tests now account for it.
+
+### Frontend
+
+| Piece | Where |
+|---|---|
+| Detail screen | `app/(tabs)/nutrition/meal.jsx`, addressed by `(day, index)` |
+| Stack layout | `app/(tabs)/nutrition/_layout.jsx` (new — index had no layout) |
+| Swap sheet | `components/nutrition/SwapMealSheet.jsx` |
+| Meal card | `components/nutrition/MealCard.jsx` — `source`, `loggedToday`, `onToggleLog`, `onPress` |
+| Plan writes | `services/mealPlanActions.js` — `mealKey`, `replaceMeal`, `cacheMealDetail` |
+| Log writes | `services/nutritionLogActions.js` — `appendLoggedMeal`, `removePlannedMealLog` |
+| Currency | `constants/currency.js` — `deviceCurrency`, `formatMoney` |
+
+### Also in this pass — theme sweep leftovers
+
+The dark-mode literal sweep matched single-quoted strings only. **22 double-quoted JSX
+props** (`color="#FFFFFF"`) had escaped it, plus two semantic colours on the macro bars.
+All tokenised; the macro bars got `colors.macro.carbs` / `colors.macro.fat`, softened a
+touch in dark. Zero hex literals remain outside `constants/theme.js`.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| backend `npm run lint && npm test -- --ci` | **Clean, 9/9** |
+| frontend `npm run lint` | **0 errors**, 15 warnings (+1: the swap sheet's reset-on-open, same pattern as the 4 known sites) |
+| frontend `npm run typecheck` | **Clean** |
+| `npx expo export --platform ios` | **Bundles clean** |
+
+**Not exercised against a live backend or on a device.** The new endpoints have not been
+called with a real Gemini key, so the prompts' output shape is verified by the validators
+in the controller, not by a real response. The first live call of each is the real test —
+in particular whether the model reliably keeps `servings: 1` and echoes the currency.
+
+### Open items after this session
+
+1. Frontend has no tests; backend has 9 API tests and no AI-controller coverage. **Open.**
+2. No end-to-end run against a real Firebase project. **Open.**
+4. Web platform declared but not installed. **Open.**
+5. Demo account seeding. **Open.**
+6. Dark mode built, **unverified on device**.
+8. Launch screen awaiting design; `colors.splash`. **Open.**
+9. Light-mode `text.muted` 3.54:1. **Open, pre-existing.**
+10. Success toast contrast. **Open, pre-existing.**
+11. ~~F16 log plan meals; F17 edit plan.~~ **Closed.**
+12. **New:** `meal-detail` and `substitute-meal` have never been called live. First real
+    call of each is the actual verification.
+13. **New:** currency is inferred, never chosen. If a user's device locale disagrees with
+    where they shop, there is no override yet — a Settings row is the obvious place.
+
+---
+
 ## 2026-09-14 — Light/dark theming (F7 + F11)
 
 **Scope:** Softened the pure-black chrome, then built the theme system it was blocking.

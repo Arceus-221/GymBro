@@ -24,28 +24,47 @@ export const callBackend = async (endpoint, body) => {
     throw new ApiError('You need to be signed in to do that.', 'NOT_AUTHENTICATED', 401);
   }
 
-  const idToken = await user.getIdToken(/* forceRefresh */ false);
+  const startedAt = Date.now();
+  let stage = 'getting-token';
+  const log = (details) => {
+    if (__DEV__) console.info('[api]', { endpoint, stage, elapsedMs: Date.now() - startedAt, ...details });
+  };
+  log({ backend: BASE_URL });
 
-  const response = await fetch(`${BASE_URL}${endpoint}`, {
+  try {
+    const idToken = await user.getIdToken(/* forceRefresh */ false);
+    stage = 'requesting-backend';
+    log({});
+
+    const response = await fetch(`${BASE_URL}${endpoint}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${idToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
-  });
+    });
+    stage = 'reading-response';
+    log({ status: response.status, requestId: response.headers.get('X-Request-ID') });
 
-  const payload = await response.json().catch(() => null);
+    const payload = await response.json().catch(() => null);
 
-  if (!response.ok) {
-    throw new ApiError(
-      payload?.message || 'Backend request failed',
-      payload?.error || 'AI_UNKNOWN_ERROR',
-      response.status
-    );
+    if (!response.ok) {
+      throw new ApiError(
+        payload?.message || 'Backend request failed',
+        payload?.error || 'AI_UNKNOWN_ERROR',
+        response.status
+      );
+    }
+
+    if (auth.currentUser !== user) {
+      throw new ApiError('The signed-in account changed.', 'AUTH_CHANGED', 0);
+    }
+    return payload;
+  } catch (error) {
+    log({ failed: true, code: error.code ?? null, status: error.status ?? null, message: error.message });
+    throw error;
   }
-
-  return payload;
 };
 
 /**

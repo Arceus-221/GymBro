@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
@@ -5,7 +6,7 @@ import { ChipGroup } from '../../components/onboarding/ChipGroup';
 import { OnboardingCard } from '../../components/onboarding/OnboardingCard';
 import { Card } from '../../components/shared/Card';
 import { Eyebrow } from '../../components/shared/Typography';
-import { DURATION_OPTIONS } from '../../constants/equipment';
+import { DIETARY_PREFERENCES, DURATION_OPTIONS, EQUIPMENT_OPTIONS, EXPERIENCE_LEVELS, FITNESS_GOALS, GENDERS } from '../../constants/equipment';
 import { radius, spacing, typography } from '../../constants/theme';
 import { useCallBackend } from '../../hooks/useCallBackend';
 import { db } from '../../services/firebase';
@@ -19,6 +20,7 @@ const DURATION_CHIPS = DURATION_OPTIONS.map((n) => ({ value: n, label: `${n} min
 
 export default function ScheduleSummaryStep() {
   const { styles, colors } = useThemedStyles(makeStyles);
+  const router = useRouter();
   const draft = useOnboardingDraftStore((s) => s.draft);
   const setField = useOnboardingDraftStore((s) => s.setField);
   const resetDraft = useOnboardingDraftStore((s) => s.reset);
@@ -28,7 +30,30 @@ export default function ScheduleSummaryStep() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleFinish = async () => {
-    if (!user) return;
+    if (!user || isSubmitting) return;
+    const has = (options, value) => options.some((option) => option.value === value);
+    if (!has(FITNESS_GOALS, draft.fitnessGoal)) {
+      useUIStore.getState().showError('Choose your fitness goal first.');
+      router.replace('/(onboarding)/goal');
+      return;
+    }
+    const positive = (value) => Number.isFinite(value) && value > 0;
+    if (!has(EXPERIENCE_LEVELS, draft.experienceLevel) || !has(GENDERS, draft.gender) ||
+        !positive(draft.age) || !positive(draft.heightCm) || !positive(draft.weightKg) ||
+        (draft.targetWeightKg != null && !positive(draft.targetWeightKg)) ||
+        !Array.isArray(draft.availableEquipment) || !draft.availableEquipment.length ||
+        draft.availableEquipment.some((item) => !has(EQUIPMENT_OPTIONS, item)) ||
+        (draft.availableEquipment.includes('bodyweight_only') && draft.availableEquipment.length > 1) ||
+        !has(DIETARY_PREFERENCES, draft.dietaryPreference)) {
+      useUIStore.getState().showError('Complete your profile details first.');
+      router.replace('/(onboarding)/profile-details');
+      return;
+    }
+    if (!DAY_OPTIONS.some((option) => option.value === draft.workoutDaysPerWeek) ||
+        !DURATION_OPTIONS.includes(draft.preferredDurationMinutes)) {
+      useUIStore.getState().showError('Choose a valid schedule.');
+      return;
+    }
     setIsSubmitting(true);
 
     try {
@@ -57,6 +82,7 @@ export default function ScheduleSummaryStep() {
         { merge: true }
       );
 
+      if (useAuthStore.getState().user?.uid !== user.uid) return;
       resetDraft();
 
       // Flipping onboardingComplete makes the root layout redirect to (tabs),
@@ -79,6 +105,7 @@ export default function ScheduleSummaryStep() {
       subtitle="Last step — then we’ll write your plan."
       nextLabel="FINISH SETUP"
       nextLoading={isSubmitting}
+      onBack={() => router.replace('/(onboarding)/profile-details')}
       onNext={handleFinish}
     >
       <ChipGroup

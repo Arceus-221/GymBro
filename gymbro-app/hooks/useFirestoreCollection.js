@@ -1,52 +1,40 @@
-import { collection, onSnapshot, query } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { collection, getDocsFromServer, onSnapshot, query } from 'firebase/firestore';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { db } from '../services/firebase';
 
-/**
- * Live subscription to a collection.
- *
- * Constraints are typically constructed inline at the call site, so their array
- * identity changes every render. Rather than trying to introspect them (two
- * different `where` clauses serialize identically), callers pass an explicit
- * `key` describing what makes this query unique — resubscription happens when
- * the path or that key changes.
- *
- * @param {string|null} path - slash path, e.g. `users/abc/dailyLogs`
- * @param {Array} constraints - firestore query constraints (where, orderBy, limit)
- * @param {string} key - identity of this particular query, e.g. `week:2026-07-27`
- */
+/** key must identify all query constraints, so old query data is never reused. */
 export function useFirestoreCollection(path, constraints = [], key = '') {
-  const [state, setState] = useState({
-    data: [],
-    isLoading: true,
-    isFromCache: false,
-    error: null,
-  });
+  const identity = path ? JSON.stringify([path, key]) : null;
+  const constraintsRef = useRef(constraints);
+  useEffect(() => { constraintsRef.current = constraints; });
+  const [attempt, setAttempt] = useState(0);
+  const [state, setState] = useState({ key: null, data: [], isLoading: false, isFromCache: false, error: null });
+  const retry = useCallback(async () => {
+    if (!path) return;
+    setAttempt((value) => value + 1);
+    await getDocsFromServer(query(collection(db, path), ...constraintsRef.current));
+  }, [path, key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!path) {
-      setState({ data: [], isLoading: false, isFromCache: false, error: null });
-      return undefined;
-    }
+    if (!path) return undefined;
+    let active = true;
+    setState((previous) => previous.key === identity && !previous.error && !previous.isLoading
+      ? previous : { key: identity, data: [], isLoading: true, isFromCache: false, error: null });
+    const unsubscribe = onSnapshot(query(collection(db, path), ...constraintsRef.current),
+      { includeMetadataChanges: true }, (snap) => {
+        if (active) setState({ key: identity, data: snap.docs.map((d) => ({ id: d.id, ...d.data() })),
+          isLoading: false, isFromCache: snap.metadata.fromCache,
+          error: null });
+      }, (error) => {
+        if (active) setState({ key: identity, data: [], isLoading: false, isFromCache: false, error });
+      });
+    return () => { active = false; unsubscribe(); };
+  }, [path, identity, attempt]);
 
-    setState((s) => ({ ...s, isLoading: true }));
-
-    const unsubscribe = onSnapshot(
-      query(collection(db, path), ...constraints),
-      (snap) => {
-        setState({
-          data: snap.docs.map((d) => ({ id: d.id, ...d.data() })),
-          isLoading: false,
-          isFromCache: snap.metadata.fromCache,
-          error: null,
-        });
-      },
-      (error) => setState({ data: [], isLoading: false, isFromCache: false, error })
-    );
-
-    return unsubscribe;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, key]);
-
-  return state;
+  if (!path) return { data: [], isLoading: false, isFromCache: false, error: null, retry };
+  if (state.key !== identity) return { data: [], isLoading: true, isFromCache: false, error: null, retry };
+  if (state.isFromCache && state.data.length === 0 && !state.error) {
+    return { ...state, isLoading: false, error: new Error('No cached data available.'), retry };
+  }
+  return { ...state, retry };
 }

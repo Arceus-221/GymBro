@@ -1,5 +1,4 @@
 import { useRouter } from 'expo-router';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,12 +8,19 @@ import { MealCard } from '../../../components/nutrition/MealCard';
 import { Card } from '../../../components/shared/Card';
 import { EmptyState } from '../../../components/shared/EmptyState';
 import { Icon } from '../../../components/shared/Icon';
+import { ReadError } from '../../../components/shared/ReadError';
+import { LoadingSpinner } from '../../../components/shared/LoadingSpinner';
 import { Eyebrow } from '../../../components/shared/Typography';
 import { radius, spacing, typography } from '../../../constants/theme';
 import { useCallBackend } from '../../../hooks/useCallBackend';
 import { useFirestoreDoc } from '../../../hooks/useFirestoreDoc';
-import { toDateId, todayLabel } from '../../../hooks/useToday';
-import { db } from '../../../services/firebase';
+import { useToday } from '../../../hooks/useToday';
+import { macrosOf, mealKey } from '../../../services/mealPlanActions';
+import {
+  appendLoggedMeal,
+  loggedPlanKeys,
+  removePlannedMealLog,
+} from '../../../services/nutritionLogActions';
 import { computeDailyTargets, sumMealTotals } from '../../../services/nutritionTargets';
 import { useAuthStore } from '../../../store/useAuthStore';
 import { useUIStore } from '../../../store/useUIStore';
@@ -32,9 +38,9 @@ export default function Nutrition() {
   const { execute, isLoading: isGenerating, loadingHint } = useCallBackend();
   const [addOpen, setAddOpen] = useState(false);
 
-  const today = toDateId();
-  const { data: todayLog } = useFirestoreDoc(user ? `users/${user.uid}/dailyLogs/${today}` : null);
-  const { data: mealPlan } = useFirestoreDoc(
+  const { dateId: today, dayLabel } = useToday();
+  const { data: todayLog, isLoading: logLoading, error: logError, retry: retryLog } = useFirestoreDoc(user ? `users/${user.uid}/dailyLogs/${today}` : null);
+  const { data: mealPlan, isLoading: planLoading, error: planError, retry: retryPlan } = useFirestoreDoc(
     user && userDoc?.currentMealPlanId
       ? `users/${user.uid}/mealPlans/${userDoc.currentMealPlanId}`
       : null
@@ -45,53 +51,82 @@ export default function Nutrition() {
   const targets = useMemo(() => computeDailyTargets(userDoc?.profile), [userDoc?.profile]);
 
   const plannedMeals = useMemo(() => {
-    if (!mealPlan?.weeklyMealSchedule) return [];
-    const day = mealPlan.weeklyMealSchedule.find((d) => d.dayLabel === todayLabel());
+    if (mealPlan?.id !== userDoc?.currentMealPlanId || !mealPlan?.weeklyMealSchedule) return [];
+    const day = mealPlan.weeklyMealSchedule.find((d) => d.dayLabel === dayLabel);
     return day?.meals ?? [];
-  }, [mealPlan]);
+  }, [mealPlan, dayLabel, userDoc?.currentMealPlanId]);
+
+  const loggedKeys = useMemo(() => loggedPlanKeys(todayLog), [todayLog]);
 
   const proteinGap = Math.max(0, targets.proteinG - Math.round(totals.proteinG ?? 0));
 
-  const handleSaveMeal = async ({ mealType, userDescription, aiEstimate }) => {
-    if (!user) return;
-    const nextMeals = [
-      ...loggedMeals,
-      { mealType, userDescription, loggedAt: new Date(), aiEstimate },
-    ];
-
+  const handleSaveMeal = async ({ mealType, userDescription, aiEstimate, operationId }) => {
+    if (!user) throw new Error('You need to sign in to save a meal.');
     try {
-      await setDoc(
-        doc(db, 'users', user.uid, 'dailyLogs', today),
-        {
-          date: today,
-          uid: user.uid,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          nutritionLog: {
-            ...(todayLog?.nutritionLog ?? {}),
-            meals: nextMeals,
-            // Recomputed app-side on every save (Phase 2 §2.5).
-            aiEstimatedTotals: sumMealTotals(nextMeals),
-          },
-        },
-        { merge: true }
-      );
+      await appendLoggedMeal({
+        uid: user.uid,
+        dateId: today,
+        existingLog: todayLog,
+        entry: { mealType, userDescription, aiEstimate, operationId, source: 'manual' },
+      });
       showToast('Meal logged ✓', 'success');
-    } catch {
+    } catch (error) {
       showError('Couldn’t save that meal — please retry.');
+      throw error;
     }
   };
+
+  // A plan meal's macros are already known, so logging it is a plain write —
+  // no estimate round trip. The key lets the same slot be un-logged by
+  // identity rather than by matching text.
+  const handleTogglePlanMeal = async (meal, index) => {
+    if (!user || !userDoc?.currentMealPlanId) return;
+    const key = mealKey(userDoc?.currentMealPlanId, dayLabel, index, meal);
+    try {
+      if (loggedKeys.has(key)) {
+        await removePlannedMealLog({
+          uid: user.uid,
+          dateId: today,
+          existingLog: todayLog,
+          plannedMealKey: key,
+        });
+        showToast('Removed from today’s log', 'success');
+      } else {
+        await appendLoggedMeal({
+          uid: user.uid,
+          dateId: today,
+          existingLog: todayLog,
+          entry: {
+            mealType: meal.mealType,
+            userDescription: meal.description,
+            aiEstimate: macrosOf(meal),
+            source: 'plan',
+            plannedMealKey: key,
+          },
+        });
+        showToast('Added to today’s log ✓', 'success');
+      }
+    } catch {
+      showError('Couldn’t update your log — please retry.');
+    }
+  };
+
+  const openMeal = (index) =>
+    router.push({ pathname: '/(tabs)/nutrition/meal', params: { day: dayLabel, index } });
 
   const handleRegenerate = () =>
     execute('/api/ai/generate-meal-plan', { weekPreference: 1, mealsPerDay: 3 })
       .then(() => showToast('New meal plan ready', 'success'))
       .catch(() => {});
 
+  if (logError || planError) return <ReadError message="Could not load your meals." onRetry={() => Promise.all([retryLog(), retryPlan()])} />;
+  if (logLoading || planLoading) return <LoadingSpinner message="Loading your meals..." />;
+
   return (
     <View style={styles.flex}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Pressable onPress={() => router.back()} hitSlop={10} accessibilityLabel="Go back">
-          <Icon name="back" size={22} color="#FFFFFF" />
+          <Icon name="back" size={22} color={colors.text.inverse} />
         </Pressable>
         <View style={styles.headerCenter}>
           <Text style={styles.headerEyebrow}>NUTRITION</Text>
@@ -104,7 +139,7 @@ export default function Nutrition() {
           accessibilityLabel="Regenerate meal plan"
           style={isGenerating && styles.refreshBusy}
         >
-          <Icon name="refresh" size={20} color="#FFFFFF" />
+          <Icon name="refresh" size={20} color={colors.text.inverse} />
         </Pressable>
       </View>
 
@@ -128,14 +163,23 @@ export default function Nutrition() {
         </View>
 
         {plannedMeals.length > 0 ? (
-          plannedMeals.map((meal, i) => <MealCard key={`${meal.mealType}-${i}`} meal={meal} />)
+          plannedMeals.map((meal, i) => (
+            <MealCard
+              key={`${meal.mealType}-${i}`}
+              meal={meal}
+              source="plan"
+              loggedToday={loggedKeys.has(mealKey(userDoc?.currentMealPlanId, dayLabel, i, meal))}
+              onToggleLog={() => handleTogglePlanMeal(meal, i)}
+              onPress={() => openMeal(i)}
+            />
+          ))
         ) : (
           <EmptyState
             title="No meal plan yet"
             message={
               isGenerating
-                ? loadingHint === 'waking'
-                  ? 'Waking Coach up — this can take a moment on first use'
+                ? loadingHint === 'slow'
+                  ? 'Still building your meal plan...'
                   : 'Building your meal plan...'
                 : 'Generate a 7-day plan tailored to your goal and dietary preference.'
             }
@@ -148,7 +192,7 @@ export default function Nutrition() {
           <View style={styles.section}>
             <Eyebrow>Logged Today</Eyebrow>
             {loggedMeals.map((meal, i) => (
-              <MealCard key={`logged-${i}`} meal={meal} logged />
+              <MealCard key={`logged-${i}`} meal={meal} source="log" />
             ))}
           </View>
         ) : null}

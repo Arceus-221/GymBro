@@ -29,7 +29,7 @@ export function SelectRow({ label, sub, icon, selected, onPress }) {
         {sub ? <Text style={styles.sub}>{sub}</Text> : null}
       </View>
       <View style={[styles.check, selected && styles.checkSelected]}>
-        {selected ? <Icon name="check" size={15} color="#FFFFFF" /> : null}
+        {selected ? <Icon name="check" size={15} color={colors.text.inverse} /> : null}
       </View>
     </Pressable>
   );

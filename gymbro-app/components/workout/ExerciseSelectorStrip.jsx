@@ -5,11 +5,12 @@ import { useThemedStyles } from '../shared/ThemeProvider';
 
 /** Horizontal pill scroller — ✓ for finished exercises, tap to jump. */
 export function ExerciseSelectorStrip({ exercises, activeIndex, onSelect }) {
-  const { styles } = useThemedStyles(makeStyles);
+  const { styles, colors } = useThemedStyles(makeStyles);
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
+      style={styles.scroll}
       contentContainerStyle={styles.strip}
     >
       {exercises.map((exercise, index) => {
@@ -27,7 +28,7 @@ export function ExerciseSelectorStrip({ exercises, activeIndex, onSelect }) {
             >
               {`${index + 1}. ${exercise.name}`}
             </Text>
-            {done ? <Icon name="check" size={13} color="#FFFFFF" /> : null}
+            {done ? <Icon name="check" size={13} color={colors.text.inverse} /> : null}
           </Pressable>
         );
       })}
@@ -36,7 +37,8 @@ export function ExerciseSelectorStrip({ exercises, activeIndex, onSelect }) {
 }
 
 const makeStyles = (colors) => StyleSheet.create({
-  strip: { gap: spacing.sm, paddingHorizontal: spacing.xl, paddingVertical: spacing.md },
+  scroll: { flexGrow: 0, flexShrink: 0 },
+  strip: { alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.xl, paddingVertical: spacing.md },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -46,7 +48,6 @@ const makeStyles = (colors) => StyleSheet.create({
     borderRadius: radius.pill,
     borderWidth: 1.5,
     borderColor: colors.onInverse.outline,
-    maxWidth: 190,
     // Must be OPAQUE, not a translucent white lift like the rest of this
     // screen: the red glow is absolutely positioned behind the strip, and
     // anything see-through lets it bleed through the label (F3). ink.black
@@ -55,10 +56,6 @@ const makeStyles = (colors) => StyleSheet.create({
   },
   pillDone: { backgroundColor: colors.brand.red, borderColor: colors.brand.red },
   pillActive: { borderColor: colors.text.inverse, borderWidth: 2 },
-  // flexShrink is 0 by default in RN, so without this the label keeps its
-  // intrinsic width and overflows the pill's maxWidth instead of ellipsizing
-  // inside it — numberOfLines={1} has nothing to truncate against until the
-  // text is actually constrained (F5).
-  text: { ...typography.eyebrow, fontSize: 9, color: colors.text.inverseMuted, flexShrink: 1 },
+  text: { ...typography.eyebrow, fontSize: 9, color: colors.text.inverseMuted },
   textOn: { color: colors.text.inverse },
 });

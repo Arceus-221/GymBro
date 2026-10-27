@@ -10,7 +10,7 @@ import { useThemedStyles } from '../shared/ThemeProvider';
  * expo-linear-gradient for one surface.
  */
 export function TodayWorkoutCard({ day, onStart, completed }) {
-  const { styles } = useThemedStyles(makeStyles);
+  const { styles, colors } = useThemedStyles(makeStyles);
   if (!day) return null;
 
   if (day.isRestDay) {
@@ -53,7 +53,7 @@ export function TodayWorkoutCard({ day, onStart, completed }) {
         onPress={onStart}
         style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed]}
       >
-        <Icon name={completed ? 'check' : 'play'} size={15} color="#FFFFFF" />
+        <Icon name={completed ? 'check' : 'play'} size={15} color={colors.text.inverse} />
         <Text style={styles.ctaText}>
           {completed ? 'COMPLETED — TRAIN AGAIN' : 'START WORKOUT'}
         </Text>

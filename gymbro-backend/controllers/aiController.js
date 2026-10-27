@@ -9,6 +9,7 @@ const db = admin.firestore();
 const { callGeminiResilient } = require('../services/aiResilienceWrapper');
 const { TOKEN_LIMITS } = require('../services/geminiService');
 const { MODEL_ID } = require('../services/aiProviders/geminiAdapter');
+const { validWorkoutTarget } = require('../services/workoutTarget');
 
 const { PLAN_SYSTEM_PROMPT, buildPlanUserPrompt } = require('../prompts/planPrompts');
 const { NUTRITION_SYSTEM_PROMPT, buildNutritionUserPrompt } = require('../prompts/nutritionPrompts');
@@ -21,12 +22,12 @@ const { CHAT_SYSTEM_PROMPT, buildChatUserPrompt } = require('../prompts/chatProm
 // ─────────────────────────────────────────────────────────────────────────
 
 const validatePlanShape = (data) =>
-  Array.isArray(data.weeklySchedule) &&
+  Array.isArray(data?.weeklySchedule) &&
   data.weeklySchedule.length === 7 &&
   data.weeklySchedule.every(day =>
-    typeof day.isRestDay === 'boolean' &&
+    day != null && typeof day.isRestDay === 'boolean' &&
     Array.isArray(day.exercises) &&
-    (day.isRestDay ? day.exercises.length === 0 : true)
+    (day.isRestDay ? day.exercises.length === 0 : day.exercises.every(validWorkoutTarget))
   );
 
 exports.generateWorkoutPlan = async (req, res) => {
@@ -100,7 +101,8 @@ exports.generateWorkoutPlan = async (req, res) => {
 
     if (userData.currentPlanId) {
       const oldPlanRef = userRef.collection('workoutPlans').doc(userData.currentPlanId);
-      batch.update(oldPlanRef, { isActive: false });
+      const oldPlanSnap = await oldPlanRef.get();
+      if (oldPlanSnap.exists) batch.update(oldPlanRef, { isActive: false });
     }
 
     batch.update(userRef, {

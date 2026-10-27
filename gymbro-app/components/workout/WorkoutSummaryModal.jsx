@@ -16,7 +16,7 @@ export function WorkoutSummaryModal({ visible, onCancel, onConfirm, saving, stat
   const [notes, setNotes] = useState('');
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={saving ? undefined : onCancel}>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
           <Eyebrow>Finish workout</Eyebrow>
@@ -67,7 +67,7 @@ export function WorkoutSummaryModal({ visible, onCancel, onConfirm, saving, stat
             loading={saving}
             onPress={() => onConfirm({ perceivedExertion, notes })}
           />
-          <Pressable onPress={onCancel} hitSlop={8}>
+          <Pressable onPress={onCancel} disabled={saving} hitSlop={8}>
             <Text style={styles.cancel}>Keep training</Text>
           </Pressable>
         </View>

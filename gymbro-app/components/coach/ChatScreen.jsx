@@ -15,9 +15,13 @@ import { radius, spacing, typography } from '../../constants/theme';
 import { useCallBackend } from '../../hooks/useCallBackend';
 import { useFirestoreCollection } from '../../hooks/useFirestoreCollection';
 import { useFirestoreDoc } from '../../hooks/useFirestoreDoc';
-import { toDateId, todayLabel } from '../../hooks/useToday';
+import { useToday } from '../../hooks/useToday';
+import { currentWorkoutStreak } from '../../services/workoutStreak';
 import { useVoiceCapture } from '../../hooks/useVoiceCapture';
 import { useAuthStore } from '../../store/useAuthStore';
+import { useConnectivityStore } from '../../store/useConnectivityStore';
+import { ReadError } from '../shared/ReadError';
+import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { useUserProfileStore } from '../../store/useUserProfileStore';
 import { Icon } from '../shared/Icon';
 import { ChatBubble } from './ChatBubble';
@@ -31,9 +35,12 @@ export function ChatScreen({ conversationId: initialConversationId = null }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const user = useAuthStore((s) => s.user);
+  const isOnline = useConnectivityStore((s) => s.isOnline);
   const userDoc = useUserProfileStore((s) => s.userDoc);
   const { execute, isLoading: isSending, loadingHint } = useCallBackend();
-  const voice = useVoiceCapture();
+  const voice = useVoiceCapture({
+    onAutoTranscript: (transcript) => setDraft((prev) => (prev ? `${prev} ${transcript}` : transcript)),
+  });
   const scrollRef = useRef(null);
 
   const [conversationId, setConversationId] = useState(initialConversationId);
@@ -47,7 +54,7 @@ export function ChatScreen({ conversationId: initialConversationId = null }) {
 
   // Only the last 30 render here — a separate window from the backend's
   // "last 10 for Gemini context" (Phase 3 §2.4); the two must not be conflated.
-  const { data: rawMessages } = useFirestoreCollection(
+  const { data: rawMessages, isLoading: messagesLoading, error: messagesError, retry: retryMessages } = useFirestoreCollection(
     messagesPath,
     [orderBy('timestamp', 'asc'), limitToLast(30)],
     `messages:${conversationId ?? 'none'}`
@@ -65,25 +72,25 @@ export function ChatScreen({ conversationId: initialConversationId = null }) {
     });
   }, [rawMessages]);
 
-  const today = toDateId();
-  const { data: todayLog } = useFirestoreDoc(user ? `users/${user.uid}/dailyLogs/${today}` : null);
-  const { data: plan } = useFirestoreDoc(
+  const { dateId: today, dayLabel } = useToday();
+  const { data: todayLog, isLoading: logLoading, error: logError, retry: retryLog } = useFirestoreDoc(user ? `users/${user.uid}/dailyLogs/${today}` : null);
+  const { data: plan, isLoading: planLoading, error: planError, retry: retryPlan } = useFirestoreDoc(
     user && userDoc?.currentPlanId
       ? `users/${user.uid}/workoutPlans/${userDoc.currentPlanId}`
       : null
   );
 
   const chips = useMemo(() => {
-    const day = plan?.weeklySchedule?.find((d) => d.dayLabel === todayLabel());
+    const day = plan?.weeklySchedule?.find((d) => d.dayLabel === dayLabel);
     return [
       { icon: 'train', label: day?.isRestDay ? 'Rest day' : day?.sessionName ?? 'No session' },
       {
         icon: 'meals',
         label: `${todayLog?.nutritionLog?.aiEstimatedTotals?.calories ?? 0} kcal`,
       },
-      { icon: 'flame', label: `${userDoc?.stats?.currentStreakDays ?? 0} day streak` },
+      { icon: 'flame', label: `${currentWorkoutStreak(userDoc?.stats, plan?.weeklySchedule, today)} day streak` },
     ];
-  }, [plan, todayLog, userDoc]);
+  }, [plan, todayLog, userDoc, today, dayLabel]);
 
   useEffect(() => {
     const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
@@ -127,6 +134,11 @@ export function ChatScreen({ conversationId: initialConversationId = null }) {
   const initial = (userDoc?.displayName || user?.displayName || 'U').charAt(0).toUpperCase();
   const isEmpty = messages.length === 0 && !pendingMessage && !failedMessage;
 
+  if (messagesError || logError || planError) {
+    return <ReadError message="Could not load Coach data." onRetry={() => Promise.all([retryMessages(), retryLog(), retryPlan()])} />;
+  }
+  if (messagesLoading || logLoading || planLoading) return <LoadingSpinner message="Loading Coach..." />;
+
   return (
     <KeyboardAvoidingView
       style={styles.flex}
@@ -135,16 +147,16 @@ export function ChatScreen({ conversationId: initialConversationId = null }) {
     >
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Pressable onPress={() => router.back()} hitSlop={10} accessibilityLabel="Go back">
-          <Icon name="back" size={22} color="#FFFFFF" />
+          <Icon name="back" size={22} color={colors.text.inverse} />
         </Pressable>
         <View style={styles.avatar}>
-          <Icon name="coachActive" size={19} color="#FFFFFF" />
+          <Icon name="coachActive" size={19} color={colors.text.inverse} />
         </View>
         <View style={styles.headerText}>
           <Text style={styles.headerTitle}>GYMBRO AI COACH</Text>
           <View style={styles.statusRow}>
-            <Icon name="dot" size={7} color={colors.success} />
-            <Text style={styles.headerStatus}>Online · Always here</Text>
+            <Icon name="dot" size={7} color={isOnline ? colors.success : colors.text.inverseMuted} />
+            <Text style={[styles.headerStatus, !isOnline && { color: colors.text.inverseMuted }]}>{isOnline ? 'Internet connected' : 'Offline'}</Text>
           </View>
         </View>
         <Pressable
@@ -152,14 +164,14 @@ export function ChatScreen({ conversationId: initialConversationId = null }) {
           hitSlop={8}
           accessibilityLabel="Go to workout"
         >
-          <Icon name="train" size={19} color="#FFFFFF" />
+          <Icon name="train" size={19} color={colors.text.inverse} />
         </Pressable>
         <Pressable
           onPress={() => router.push('/(profile)/progress')}
           hitSlop={8}
           accessibilityLabel="Go to progress"
         >
-          <Icon name="chart" size={19} color="#FFFFFF" />
+          <Icon name="chart" size={19} color={colors.text.inverse} />
         </Pressable>
       </View>
 
@@ -205,9 +217,7 @@ export function ChatScreen({ conversationId: initialConversationId = null }) {
 
         {isSending ? (
           <Text style={styles.typing}>
-            {loadingHint === 'waking'
-              ? 'Waking Coach up — this can take a moment on first use'
-              : 'Coach is typing…'}
+            {loadingHint === 'slow' ? 'Still waiting for Coach...' : 'Coach is typing...'}
           </Text>
         ) : null}
       </ScrollView>

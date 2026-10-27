@@ -75,6 +75,9 @@ export const lightColors = {
     subtle: 'rgba(255,255,255,0.6)',
   },
   backdrop: 'rgba(0,0,0,0.6)',
+  // The two non-brand macro bars on the nutrition ring panel. Protein uses the
+  // brand red; these two need hues of their own to stay distinguishable.
+  macro: { carbs: '#F5A524', fat: '#3B82F6' },
   // The launch screen deliberately does NOT follow the theme: it carries its
   // own background in both palettes by design, so the main logo needs no light
   // variant. Identical in lightColors and darkColors on purpose — these are the
@@ -141,6 +144,8 @@ export const darkColors = {
     subtle: 'rgba(255,255,255,0.55)',
   },
   backdrop: 'rgba(0,0,0,0.72)',
+  // A touch less saturated than light mode so they sit with the calmer red.
+  macro: { carbs: '#E8A23A', fat: '#5B93F0' },
   // Matches lightColors on purpose — see the note there.
   splash: { background: '#FFFFFF', text: '#555555' },
 };

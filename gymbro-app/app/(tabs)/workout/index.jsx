@@ -1,10 +1,11 @@
-import { useRouter } from 'expo-router';
-import { doc, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { useEffect, useMemo, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EmptyState } from '../../../components/shared/EmptyState';
 import { Icon } from '../../../components/shared/Icon';
+import { ReadError } from '../../../components/shared/ReadError';
 import { Eyebrow } from '../../../components/shared/Typography';
 import { ExerciseSelectorStrip } from '../../../components/workout/ExerciseSelectorStrip';
 import { InlineRestTimerCard } from '../../../components/workout/InlineRestTimerCard';
@@ -14,7 +15,8 @@ import { radius, spacing, typography } from '../../../constants/theme';
 import { formatWeight } from '../../../constants/units';
 import { useFirestoreDoc } from '../../../hooks/useFirestoreDoc';
 import { useRestTimer } from '../../../hooks/useRestTimer';
-import { toDateId, todayLabel } from '../../../hooks/useToday';
+import { useToday } from '../../../hooks/useToday';
+import { streakAfterWorkout } from '../../../services/workoutStreak';
 import { db } from '../../../services/firebase';
 import { useActiveWorkoutStore } from '../../../store/useActiveWorkoutStore';
 import { useAuthStore } from '../../../store/useAuthStore';
@@ -34,11 +36,19 @@ export default function WorkoutMode() {
   const showError = useUIStore((s) => s.showError);
 
   const session = useActiveWorkoutStore();
+  const { dateId: today, dayLabel } = useToday();
   const restTimer = useRestTimer();
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const finishing = useRef(false);
+  useFocusEffect(useCallback(() => {
+    finishing.current = false;
+    setFocused(true);
+    return () => setFocused(false);
+  }, []));
 
-  const { data: plan, isLoading } = useFirestoreDoc(
+  const { data: plan, isLoading, error: planError, retry: retryPlan } = useFirestoreDoc(
     user && userDoc?.currentPlanId
       ? `users/${user.uid}/workoutPlans/${userDoc.currentPlanId}`
       : null
@@ -46,21 +56,23 @@ export default function WorkoutMode() {
 
   const todaysPlanDay = useMemo(() => {
     if (!plan?.weeklySchedule) return null;
-    return plan.weeklySchedule.find((d) => d.dayLabel === todayLabel()) ?? null;
-  }, [plan]);
+    return plan.weeklySchedule.find((d) => d.dayLabel === dayLabel) ?? null;
+  }, [plan, dayLabel]);
 
   // Seed the in-memory session once today's plan day is known. Everything from
   // here is local state until "Finish Workout" (Phase 3 §3.2).
   useEffect(() => {
-    if (!todaysPlanDay || todaysPlanDay.isRestDay) return;
-    if (session.isActive && session.planId === plan?.planId) return;
+    if (!focused || finishing.current || !todaysPlanDay || todaysPlanDay.isRestDay) return;
+    if (session.isActive) return;
     session.startSession({
       planId: plan?.planId ?? null,
       sessionName: todaysPlanDay.sessionName,
       exercises: todaysPlanDay.exercises ?? [],
+      workoutDate: today,
+      schedule: plan?.weeklySchedule,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [todaysPlanDay, plan?.planId]);
+  }, [todaysPlanDay, plan?.planId, focused, session.isActive, today]);
 
   const exercise = session.exercises[session.exerciseIndex];
   const currentSetIndex = exercise ? exercise.sets.findIndex((s) => !s.completed) : -1;
@@ -74,61 +86,80 @@ export default function WorkoutMode() {
   };
 
   const handleFinish = async ({ perceivedExertion, notes }) => {
-    if (!user) return;
+    if (!user || saving) return;
+    if (!session.exercises.some((item) => item.sets.some((set) => set.completed))) {
+      showError('Log at least one set before saving.');
+      return;
+    }
     setSaving(true);
-    const today = toDateId();
+    const workoutDate = session.workoutDate ?? today;
 
     try {
       const payload = session.buildSessionPayload({ perceivedExertion, notes });
-      const batch = writeBatch(db);
+      const logRef = doc(db, 'users', user.uid, 'dailyLogs', workoutDate);
+      const userRef = doc(db, 'users', user.uid);
 
-      batch.set(
-        doc(db, 'users', user.uid, 'dailyLogs', today),
-        {
-          date: today,
-          // Redundant uid is what makes the Progress screen's collection-group
-          // query possible (Phase 1 §2).
+      // Transactions require connectivity and only succeed after server acknowledgement.
+      // Keep the active session available when the save fails.
+      await runTransaction(db, async (transaction) => {
+        const [logSnapshot, userSnapshot] = await Promise.all([
+          transaction.get(logRef),
+          transaction.get(userRef),
+        ]);
+        if (!userSnapshot.exists()) throw new Error('User profile not found');
+        const previousSession = logSnapshot.data()?.workoutSession;
+        if (previousSession?.completionStatus === 'completed' && payload.completionStatus !== 'completed') {
+          throw new Error('Complete all sets before replacing a completed workout.');
+        }
+        const alreadySaved = previousSession?.sessionId === session.sessionId ||
+          (!previousSession?.sessionId && previousSession?.startTime?.toMillis?.() === session.startTime);
+        const stats = userSnapshot.data().stats ?? {};
+        const nextStreak = streakAfterWorkout(stats, session.schedule, workoutDate);
+
+        transaction.set(logRef, {
+          date: workoutDate,
           uid: user.uid,
-          createdAt: serverTimestamp(),
+          ...(logSnapshot.exists() ? {} : { createdAt: serverTimestamp() }),
           updatedAt: serverTimestamp(),
           workoutSession: payload,
-        },
-        { merge: true }
-      );
-
-      const stats = userDoc?.stats ?? {};
-      const nextStreak = computeStreak(stats.lastWorkoutDate, today, stats.currentStreakDays ?? 0);
-
-      batch.update(doc(db, 'users', user.uid), {
-        uid: user.uid,
-        'stats.totalWorkoutsCompleted': (stats.totalWorkoutsCompleted ?? 0) + 1,
-        'stats.currentStreakDays': nextStreak,
-        'stats.longestStreakDays': Math.max(stats.longestStreakDays ?? 0, nextStreak),
-        'stats.lastWorkoutDate': today,
-        updatedAt: serverTimestamp(),
+        }, { merge: true });
+        if (!alreadySaved) {
+          const becameCompleted = payload.completionStatus === 'completed' &&
+            previousSession?.completionStatus !== 'completed';
+          const updates = {
+            updatedAt: serverTimestamp(),
+            ...(!previousSession ? { 'stats.totalWorkoutsCompleted': (stats.totalWorkoutsCompleted ?? 0) + 1 } : {}),
+            ...(becameCompleted && nextStreak !== null ? {
+              'stats.currentStreakDays': nextStreak,
+              'stats.longestStreakDays': Math.max(stats.longestStreakDays ?? 0, nextStreak),
+              'stats.lastWorkoutDate': workoutDate,
+            } : {}),
+          };
+          transaction.update(userRef, updates);
+        }
       });
 
-      // Not awaited: Firestore's local cache applies the write immediately and
-      // queues it for the server, so navigating now is safe even offline
-      // (Phase 3 §3.2). Awaiting would hang on bad gym Wi-Fi for no benefit.
-      batch.commit().catch(() => {});
-
+      if (useAuthStore.getState().user?.uid !== user.uid) return;
+      finishing.current = true;
       session.endSession();
       setSummaryOpen(false);
       showToast('Workout saved ✓', 'success');
       router.replace('/(tabs)');
-    } catch {
-      showError('Couldn’t save that workout — please retry.');
+    } catch (error) {
+      showError(error?.message === 'Complete all sets before replacing a completed workout.'
+        ? error.message
+        : 'Could not save that workout. Please retry.');
     } finally {
       setSaving(false);
     }
   };
 
+  if (planError) return <ReadError message="Could not load your workout plan." onRetry={retryPlan} />;
   if (isLoading) {
     return <DarkShell insets={insets}><Text style={styles.muted}>Loading your plan...</Text></DarkShell>;
   }
 
-  if (!todaysPlanDay) {
+  if (!todaysPlanDay && !session.isActive) {
     return (
       <DarkShell insets={insets}>
         <EmptyState
@@ -141,7 +172,7 @@ export default function WorkoutMode() {
     );
   }
 
-  if (todaysPlanDay.isRestDay) {
+  if (todaysPlanDay?.isRestDay && !session.isActive) {
     return (
       <DarkShell insets={insets}>
         <EmptyState
@@ -178,7 +209,7 @@ export default function WorkoutMode() {
         <View style={styles.headerCenter}>
           <Text style={styles.headerEyebrow}>WORKOUT MODE</Text>
           <Text style={styles.headerDay} numberOfLines={1}>
-            {todaysPlanDay.sessionName}
+            {session.sessionName || todaysPlanDay?.sessionName}
           </Text>
         </View>
         <Text style={styles.headerCount}>
@@ -216,6 +247,7 @@ export default function WorkoutMode() {
           // exercise's rows.
           key={session.exerciseIndex}
           sets={exercise.sets}
+          targetUnit={exercise.targetUnit}
           currentSetIndex={currentSetIndex}
           onChangeSet={(setIndex, patch) =>
             session.updateSet(session.exerciseIndex, setIndex, patch)
@@ -232,7 +264,7 @@ export default function WorkoutMode() {
             disabled={allSetsDone}
             style={[styles.logButton, allSetsDone && styles.logButtonDone]}
           >
-            <Icon name="check" size={16} color="#FFFFFF" />
+            <Icon name="check" size={16} color={colors.text.inverse} />
             <Text style={styles.logButtonText}>
               {allSetsDone ? 'ALL SETS DONE' : 'LOG SET'}
             </Text>
@@ -241,7 +273,7 @@ export default function WorkoutMode() {
             onPress={() => restTimer.start(exercise.restSeconds ?? 90)}
             style={styles.restButton}
           >
-            <Icon name="timer" size={16} color="#FFFFFF" />
+            <Icon name="timer" size={16} color={colors.text.inverse} />
             <Text style={styles.restButtonText}>REST</Text>
           </Pressable>
         </View>
@@ -312,16 +344,6 @@ function summarize(session) {
     ? Math.max(1, Math.round((Date.now() - session.startTime) / 60000))
     : 0;
   return { completedSets, volumeKg: Math.round(volumeKg), durationMinutes };
-}
-
-/** Consecutive-day streak: yesterday continues it, today keeps it, a gap resets. */
-function computeStreak(lastWorkoutDate, today, currentStreak) {
-  if (!lastWorkoutDate) return 1;
-  if (lastWorkoutDate === today) return Math.max(currentStreak, 1);
-
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  return lastWorkoutDate === toDateId(yesterday) ? currentStreak + 1 : 1;
 }
 
 const makeStyles = (colors) => StyleSheet.create({

@@ -21,6 +21,7 @@ import {
   DIETARY_PREFERENCES,
   DURATION_OPTIONS,
   EQUIPMENT_OPTIONS,
+  toggleEquipmentSelection,
   EXPERIENCE_LEVELS,
   FITNESS_GOALS,
   GENDERS,
@@ -70,7 +71,9 @@ export default function EditProfile() {
       targetWeight: round1(toDisplayWeight(profile.targetWeightKg, weightUnit)),
       fitnessGoal: profile.fitnessGoal ?? null,
       experienceLevel: profile.experienceLevel ?? null,
-      availableEquipment: profile.availableEquipment ?? [],
+      availableEquipment: (profile.availableEquipment ?? []).length > 1
+        ? profile.availableEquipment.filter((item) => item !== 'bodyweight_only')
+        : (profile.availableEquipment ?? []),
       dietaryPreference: profile.dietaryPreference ?? 'none',
       workoutDaysPerWeek: profile.workoutDaysPerWeek ?? 4,
       preferredDurationMinutes: profile.preferredDurationMinutes ?? 45,
@@ -83,9 +86,7 @@ export default function EditProfile() {
   const toggleEquipment = (value) =>
     setForm((prev) => ({
       ...prev,
-      availableEquipment: prev.availableEquipment.includes(value)
-        ? prev.availableEquipment.filter((v) => v !== value)
-        : [...prev.availableEquipment, value],
+      availableEquipment: toggleEquipmentSelection(prev.availableEquipment, value),
     }));
 
   const isComplete =

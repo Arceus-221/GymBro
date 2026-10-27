@@ -2,10 +2,14 @@ import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/shared/Button';
 import { Card } from '../../components/shared/Card';
+import { ReadError } from '../../components/shared/ReadError';
 import { ScreenHeader } from '../../components/shared/ScreenHeader';
 import { Eyebrow, Heading } from '../../components/shared/Typography';
 import { radius, spacing, typography } from '../../constants/theme';
 import { formatWeight } from '../../constants/units';
+import { useFirestoreDoc } from '../../hooks/useFirestoreDoc';
+import { useToday } from '../../hooks/useToday';
+import { currentWorkoutStreak } from '../../services/workoutStreak';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useUserProfileStore } from '../../store/useUserProfileStore';
@@ -22,6 +26,8 @@ export default function Profile() {
   const user = useAuthStore((s) => s.user);
   const userDoc = useUserProfileStore((s) => s.userDoc);
   const weightUnit = useSettingsStore((s) => s.weightUnit);
+  const { dateId: today } = useToday();
+  const { data: plan, isLoading: planLoading, error: planError, retry: retryPlan } = useFirestoreDoc(user && userDoc?.currentPlanId ? `users/${user.uid}/workoutPlans/${userDoc.currentPlanId}` : null);
 
   const profile = userDoc?.profile ?? {};
   const stats = userDoc?.stats ?? {};
@@ -56,9 +62,11 @@ export default function Profile() {
 
         <View style={styles.statRow}>
           <StatTile value={stats.totalWorkoutsCompleted ?? 0} label="Workouts" />
-          <StatTile value={stats.currentStreakDays ?? 0} label="Streak" />
+          <StatTile value={planError || planLoading ? '?' : currentWorkoutStreak(stats, plan?.weeklySchedule, today)} label="Streak" />
           <StatTile value={stats.longestStreakDays ?? 0} label="Best" />
         </View>
+
+        {planError ? <ReadError message="Could not load your workout schedule." onRetry={retryPlan} /> : null}
 
         <Card style={styles.setup}>
           <Eyebrow>Your setup</Eyebrow>

@@ -35,7 +35,10 @@ const db = admin.firestore();
 const { callGeminiResilient } = require('../services/aiResilienceWrapper');
 const { TOKEN_LIMITS } = require('../services/geminiService');
 const { MEAL_PLAN_SYSTEM_PROMPT, buildMealPlanUserPrompt } = require('../prompts/mealPlanPrompts');
+const { MEAL_DETAIL_SYSTEM_PROMPT, buildMealDetailUserPrompt } = require('../prompts/mealDetailPrompts');
+const { SUBSTITUTE_MEAL_SYSTEM_PROMPT, buildSubstituteMealUserPrompt } = require('../prompts/substituteMealPrompts');
 const { MODEL_ID } = require('../services/aiProviders/geminiAdapter');
+const { identifyMeals } = require('../services/mealIdentity');
 
 const MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack', 'pre_workout', 'post_workout'];
 
@@ -113,7 +116,7 @@ exports.generateMealPlan = async (req, res) => {
       planName: result.planName,
       isActive: true,
       durationWeeks: result.durationWeeks,
-      weeklyMealSchedule: result.weeklyMealSchedule,
+      weeklyMealSchedule: identifyMeals(result.weeklyMealSchedule),
       aiGenerationContext: {
         profileSnapshot: profile,
         customInstructions: customInstructions ?? null,
@@ -141,6 +144,121 @@ exports.generateMealPlan = async (req, res) => {
       success: false,
       error: error.code || 'AI_UNKNOWN_ERROR',
       message: error.message || 'Something went wrong generating the meal plan.',
+    });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Recipe detail — POST /api/ai/meal-detail
+//
+// Expands one plan meal into ingredients (with estimated local prices),
+// method and timing. Deliberately NOT part of plan generation: 21 meals'
+// worth of this would exceed TOKEN_LIMITS.MEAL_PLANNER several times over.
+// The client caches the result into the plan document, so each meal costs
+// at most one call over its lifetime.
+//
+// Prices are estimates in the currency the client sends — derived from the
+// device locale — and the client labels them as such. The backend does not
+// store or validate real prices; the AI is estimating, not quoting.
+// ─────────────────────────────────────────────────────────────────────────
+
+const isFiniteNonNegative = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0;
+
+const validateMealDetailShape = (data) =>
+  data.servings === 1 &&
+  isFiniteNonNegative(data.prepMinutes) &&
+  isFiniteNonNegative(data.cookMinutes) &&
+  Array.isArray(data.ingredients) &&
+  data.ingredients.length > 0 &&
+  data.ingredients.every(
+    (i) =>
+      typeof i.item === 'string' &&
+      typeof i.quantity === 'string' &&
+      isFiniteNonNegative(i.estimatedCost)
+  ) &&
+  Array.isArray(data.steps) &&
+  data.steps.length >= 3 &&
+  data.steps.every((step) => typeof step === 'string' && step.trim().length > 0) &&
+  isFiniteNonNegative(data.estimatedCost) &&
+  typeof data.currency === 'string' &&
+  (data.tip === null || typeof data.tip === 'string');
+
+exports.getMealDetail = async (req, res) => {
+  const { meal, currency } = req.body;
+
+  try {
+    const userSnap = await db.collection('users').doc(req.user.uid).get();
+    if (!userSnap.exists) {
+      return res.status(404).json({ success: false, error: 'USER_NOT_FOUND', message: 'User document does not exist.' });
+    }
+    const profile = userSnap.data().profile ?? {};
+
+    const result = await callGeminiResilient(
+      MEAL_DETAIL_SYSTEM_PROMPT,
+      buildMealDetailUserPrompt(meal, currency, profile),
+      TOKEN_LIMITS.MEAL_DETAIL,
+      validateMealDetailShape
+    );
+
+    // The model is told to echo the currency; make sure it did rather than
+    // trusting it, since the client renders whatever comes back.
+    return res.status(200).json({ success: true, data: { ...result, currency } });
+  } catch (error) {
+    return res.status(error.httpStatus || 500).json({
+      success: false,
+      error: error.code || 'AI_UNKNOWN_ERROR',
+      message: error.message || 'Something went wrong building that recipe.',
+    });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Meal substitution — POST /api/ai/substitute-meal
+//
+// The meal counterpart of substituteExercise. Proposes 3 alternatives that
+// hold the slot's macros; the client writes the chosen one into the plan
+// document directly (firestore.rules grants the owner update on mealPlans).
+// Dietary preference and medical notes are read server-side from the
+// profile, never trusted from the request, same as generateMealPlan.
+// ─────────────────────────────────────────────────────────────────────────
+
+const validateSubstituteMealShape = (data) =>
+  Array.isArray(data.alternatives) &&
+  data.alternatives.length === 3 &&
+  data.alternatives.every(
+    (alt) =>
+      typeof alt.description === 'string' &&
+      alt.description.trim().length > 0 &&
+      typeof alt.calories === 'number' &&
+      typeof alt.proteinG === 'number' &&
+      typeof alt.carbsG === 'number' &&
+      typeof alt.fatsG === 'number' &&
+      typeof alt.whyItFits === 'string'
+  );
+
+exports.substituteMeal = async (req, res) => {
+  const { meal, reason } = req.body;
+
+  try {
+    const userSnap = await db.collection('users').doc(req.user.uid).get();
+    if (!userSnap.exists) {
+      return res.status(404).json({ success: false, error: 'USER_NOT_FOUND', message: 'User document does not exist.' });
+    }
+    const profile = userSnap.data().profile ?? {};
+
+    const result = await callGeminiResilient(
+      SUBSTITUTE_MEAL_SYSTEM_PROMPT,
+      buildSubstituteMealUserPrompt(meal, profile, reason),
+      TOKEN_LIMITS.SUBSTITUTE_MEAL,
+      validateSubstituteMealShape
+    );
+
+    return res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    return res.status(error.httpStatus || 500).json({
+      success: false,
+      error: error.code || 'AI_UNKNOWN_ERROR',
+      message: error.message || 'Something went wrong finding alternatives.',
     });
   }
 };

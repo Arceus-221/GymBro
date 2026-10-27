@@ -8,8 +8,10 @@ import { create } from 'zustand';
 export const useUserProfileStore = create((set) => ({
   userDoc: null,
   isLoading: true,
+  error: null,
 
-  setUserDoc: (userDoc) => set({ userDoc, isLoading: false }),
+  setUserDoc: (userDoc) => set({ userDoc, isLoading: false, error: null }),
+  setError: (error) => set({ userDoc: null, isLoading: false, error }),
   setLoading: (isLoading) => set({ isLoading }),
-  clear: () => set({ userDoc: null, isLoading: true }),
+  clear: () => set({ userDoc: null, isLoading: true, error: null }),
 }));

@@ -2,6 +2,7 @@
 // Security backbone of the backend. Every AI/audio route is wrapped with
 // this middleware. See Phase 1 SRS §3D for full rationale.
 const admin = require('../config/firebase');
+const { traceStage } = require('../services/requestTrace');
 
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -17,6 +18,7 @@ const verifyToken = async (req, res, next) => {
   const idToken = authHeader.split('Bearer ')[1].trim();
 
   try {
+    traceStage('verifying-token');
     const decodedToken = await admin.auth().verifyIdToken(idToken);
 
     req.user = {
@@ -25,6 +27,7 @@ const verifyToken = async (req, res, next) => {
       name: decodedToken.name || null,
     };
 
+    traceStage('authenticated');
     next();
   } catch (error) {
     if (error.code === 'auth/id-token-expired') {
